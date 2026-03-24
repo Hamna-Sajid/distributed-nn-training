@@ -15,6 +15,8 @@ import threading
 import time
 import numpy as np
 
+from coordination.logger import PerformanceLogger
+from tests.evaluate import compute_metrics
 from communication.protocol import (
     encode_message, decode_message,
     MSG_REGISTER, MSG_BENCHMARK, MSG_BENCH_RESULT,
@@ -118,6 +120,8 @@ class Master:
         y_pred = self.model.forward(X_test)
         test_loss = self.model.compute_loss(y_pred, y_test)
         print(f"\n[Master] Final test loss: {test_loss:.4f}")
+        metrics = compute_metrics(y_pred, y_test)   
+        print(f"[Master] Evaluation metrics: {metrics}")
 
         # Shut down workers
         for worker_id, w in self.workers.items():
@@ -162,6 +166,8 @@ class Master:
           4. Update global model
           5. Broadcast updated weights via MODEL_UPDATE
         """
+        logger = PerformanceLogger()
+
         for epoch in range(self.n_epochs):
             # Signal all workers to start this epoch
             for w in self.workers.values():
@@ -181,6 +187,8 @@ class Master:
             # Log per-epoch losses
             avg_loss = np.mean([v["loss"] for v in all_gradients.values()])
             print(f"[Master] Epoch {epoch+1}/{self.n_epochs} | Avg Loss: {avg_loss:.4f}")
+
+            logger.log(epoch + 1, avg_loss, {wid: v["loss"] for wid, v in all_gradients.items()})
 
             # Weighted gradient average (weight = batch size)
             averaged = self._aggregate_gradients(all_gradients)
