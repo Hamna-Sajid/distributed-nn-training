@@ -1,30 +1,40 @@
+# Master node runtime and training hyperparameters.
 master:
   host: localhost
   port: 5000
   n_workers: 2
   n_epochs: 10
   lr: 0.01
+  # Square matrix dimension used for worker benchmark RTT task.
   benchmark_matrix_size: 100
 
+# Dataset sampling and splitting controls.
 data:
   n_samples: 10000
   test_size: 0.1
   random_state: 42
 
+# Optional per-worker artificial delay in seconds.
 workers:
   artificial_delays:
     - 0.0
     - 2.0
 
+# Output files produced by a normal training run.
 logging:
   training_log_path: logs/training_log.csv
   run_summary_path: logs/last_run_summary.json
 
+# Benchmark sweep configuration.
 benchmark:
+  # Multiple dataset sizes to compare runtime and quality.
   sample_sizes:
     - 10000
     - 15000
     - 20000
+  # Number of repeats per sample size.
   repeats: 1
+  # Wait time before launching workers after master starts.
   master_startup_wait_sec: 1.5
+  # Aggregated benchmark comparison table.
   results_csv_path: logs/benchmark_results.csv

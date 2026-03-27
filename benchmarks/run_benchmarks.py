@@ -16,12 +16,23 @@ from project_config import load_config
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for benchmark execution.
+
+    Returns
+    -------
+    argparse.Namespace
+        Parsed arguments containing optional config path override.
+    """
     parser = argparse.ArgumentParser(description="Run benchmark sweeps for sample sizes.")
     parser.add_argument("--config", default="config.yaml", help="Path to YAML config file.")
     return parser.parse_args()
 
 
 def _write_benchmark_row(results_csv: Path, row: Dict[str, object]) -> None:
+    """Append one benchmark result row to the comparison CSV.
+
+    Creates parent directories on demand and writes a header only once.
+    """
     results_csv.parent.mkdir(parents=True, exist_ok=True)
 
     write_header = not results_csv.exists()
@@ -52,6 +63,7 @@ def _write_benchmark_row(results_csv: Path, row: Dict[str, object]) -> None:
 
 
 def _terminate_if_running(proc: subprocess.Popen) -> None:
+    """Gracefully stop a subprocess if it is still active."""
     if proc.poll() is None:
         proc.terminate()
         try:
@@ -68,6 +80,12 @@ def run_single_benchmark(
     worker_delays: List[float],
     n_workers: int,
 ) -> Dict[str, object]:
+    """Run one benchmark case and return normalized summary fields.
+
+    This starts one master process and N worker processes, waits for all
+    processes to finish, then reads the generated run summary JSON and returns
+    a flattened dictionary suitable for a CSV row.
+    """
     now_label = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_id = f"s{sample_size}_r{repeat_idx}_{now_label}"
 
@@ -159,6 +177,7 @@ def run_single_benchmark(
 
 
 def main() -> None:
+    """Execute benchmark sweep defined in config and persist all results."""
     args = parse_args()
     cfg = load_config(args.config)
 
