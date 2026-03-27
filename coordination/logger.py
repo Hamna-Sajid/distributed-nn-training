@@ -29,22 +29,31 @@ class PerformanceLogger:
         Timestamp set at the beginning of each epoch — used for per-epoch duration.
     """
 
-    def __init__(self, filepath: str = "logs/training_log.csv"):
+    def __init__(
+        self,
+        filepath: str = "logs/training_log.csv",
+        worker_ids: list = None,
+        append: bool = False,
+    ):
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         self.filepath = filepath
         self.start_time = time.time()
         self.epoch_start = self.start_time
+        self.worker_ids = sorted(worker_ids or [0, 1])
 
-        with open(filepath, "w", newline="") as f:
+        mode = "a" if append else "w"
+        should_write_header = (not append) or (not os.path.exists(filepath))
+
+        with open(filepath, mode, newline="") as f:
             writer = csv.writer(f)
-            writer.writerow([
-                "epoch",
-                "avg_loss",
-                "epoch_duration_sec",   # how long THIS epoch took
-                "total_elapsed_sec",    # total time since training started
-                "worker0_loss",
-                "worker1_loss",
-            ])
+            if should_write_header:
+                header = [
+                    "epoch",
+                    "avg_loss",
+                    "epoch_duration_sec",   # how long THIS epoch took
+                    "total_elapsed_sec",    # total time since training started
+                ] + [f"worker{wid}_loss" for wid in self.worker_ids]
+                writer.writerow(header)
         print(f"[Logger] Writing metrics to {filepath}")
 
     def start_epoch(self):
@@ -73,13 +82,12 @@ class PerformanceLogger:
 
         with open(self.filepath, "a", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow([
+            row = [
                 epoch,
                 round(avg_loss, 6),
                 epoch_duration,
                 total_elapsed,
-                round(worker_losses.get(0, 0.0), 6),
-                round(worker_losses.get(1, 0.0), 6),
-            ])
+            ] + [round(worker_losses.get(wid, 0.0), 6) for wid in self.worker_ids]
+            writer.writerow(row)
         print(f"[Master] Epoch {epoch} | Loss: {avg_loss:.4f} | "
               f"Epoch time: {epoch_duration:.1f}s | Total: {total_elapsed:.1f}s")

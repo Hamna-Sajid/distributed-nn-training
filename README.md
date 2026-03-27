@@ -58,6 +58,18 @@ cd distributed-nn-training
 pip install -r requirements.txt
 ```
 
+### Global Configuration
+The project uses a root-level `config.yaml` for global settings.
+
+Key sections:
+- `master`: host, port, worker count, epochs, learning rate
+- `data`: dataset sample size and split settings
+- `workers`: per-worker artificial delays
+- `logging`: training CSV and run summary JSON paths
+- `benchmark`: sample size sweep + output CSV path
+
+Edit `config.yaml` once, then run your experiments without changing code.
+
 ### Run Single-Node Test (verify NN correctness first)
 ```bash
 python tests/test_single_node.py
@@ -74,6 +86,34 @@ python run_worker.py 0
 # Terminal 3 — Worker 1 (slow node, 2s artificial delay)
 python run_worker.py 1 2.0
 ```
+
+You can override sample size per run (useful for quick experiments):
+```bash
+python run_master.py --n-samples 20000
+```
+
+Each run now stores:
+- Per-epoch training CSV (`logs/training_log.csv` by default)
+- Run summary JSON (`logs/last_run_summary.json` by default)
+
+### Benchmark Sweep (Multiple Sample Sizes)
+Run a complete benchmark sweep from `config.yaml`:
+```bash
+python benchmarks/run_benchmarks.py
+```
+
+By default, this script:
+- Iterates over `benchmark.sample_sizes`
+- Repeats each case `benchmark.repeats` times
+- Launches master + workers automatically
+- Writes per-run files under `logs/runs/`
+- Appends comparison rows to `logs/benchmark_results.csv`
+
+Example comparison columns:
+- `sample_size`
+- `total_runtime_sec`
+- `final_test_loss`
+- `accuracy`, `precision`, `recall`, `f1`
 
 ---
 

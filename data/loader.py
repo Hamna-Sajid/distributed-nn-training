@@ -14,7 +14,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelBinarizer
 
 
-def generate_dataset(n_samples: int = 60000) -> tuple:
+def generate_dataset(
+    n_samples: int = 60000,
+    test_size: float = 0.1,
+    random_state: int = 42,
+) -> tuple:
     """Load and prepare the MNIST dataset for multi-label classification.
 
     Downloads MNIST automatically on first run (cached after that).
@@ -26,6 +30,10 @@ def generate_dataset(n_samples: int = 60000) -> tuple:
     n_samples : int
         Number of samples to use from MNIST. Max is 70000.
         Default is 60000 (standard MNIST training set size).
+    test_size : float
+        Proportion of the dataset reserved for the test split.
+    random_state : int
+        Seed for deterministic train/test splitting.
 
     Returns
     -------
@@ -41,6 +49,7 @@ def generate_dataset(n_samples: int = 60000) -> tuple:
     print("[Data] Loading MNIST dataset (this may take a moment on first run)...")
     mnist = fetch_openml("mnist_784", version=1, as_frame=False, parser="auto")
 
+    n_samples = min(int(n_samples), mnist.data.shape[0])
     X = mnist.data[:n_samples].astype(np.float32) / 255.0  # normalize to [0,1]
     y_raw = mnist.target[:n_samples].astype(int)
 
@@ -49,7 +58,7 @@ def generate_dataset(n_samples: int = 60000) -> tuple:
     y = lb.fit_transform(y_raw).astype(np.float32)
 
     print(f"[Data] Loaded {X.shape[0]} samples, {X.shape[1]} features, {y.shape[1]} classes")
-    return train_test_split(X, y, test_size=0.1, random_state=42)
+    return train_test_split(X, y, test_size=test_size, random_state=random_state)
 
 
 def partition_data(
