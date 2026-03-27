@@ -6,7 +6,6 @@ from project_config import DEFAULT_CONFIG, load_config
 
 
 def test_load_config_uses_defaults_when_file_missing(tmp_path: Path):
-    """Ensure defaults are returned when the config file does not exist."""
     cfg = load_config(str(tmp_path / "missing.yaml"))
 
     assert cfg["data"]["n_samples"] == DEFAULT_CONFIG["data"]["n_samples"]
@@ -14,7 +13,6 @@ def test_load_config_uses_defaults_when_file_missing(tmp_path: Path):
 
 
 def test_load_config_merges_nested_overrides(tmp_path: Path):
-    """Ensure nested user overrides are merged while defaults are preserved."""
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(
         "\n".join(
