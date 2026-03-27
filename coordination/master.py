@@ -13,8 +13,6 @@ The master is responsible for:
 import socket
 import threading
 import time
-import json
-import os
 import numpy as np
 
 from coordination.logger import PerformanceLogger
@@ -54,22 +52,12 @@ class Master:
     """
 
     def __init__(self, n_workers: int = 2, host: str = "localhost",
-                 port: int = 5000, n_epochs: int = 20, lr: float = 0.01,
-                 n_samples: int = 10000, test_size: float = 0.1,
-                 random_state: int = 42, benchmark_matrix_size: int = 100,
-                 training_log_path: str = "logs/training_log.csv",
-                 run_summary_path: str = "logs/last_run_summary.json"):
+                 port: int = 5000, n_epochs: int = 20, lr: float = 0.01):
         self.n_workers = n_workers
         self.host = host
         self.port = port
         self.n_epochs = n_epochs
         self.lr = lr
-        self.n_samples = n_samples
-        self.test_size = test_size
-        self.random_state = random_state
-        self.benchmark_matrix_size = benchmark_matrix_size
-        self.training_log_path = training_log_path
-        self.run_summary_path = run_summary_path
         self.workers = {}
         self.model = MLP(lr=lr)
 
@@ -83,7 +71,6 @@ class Master:
         - Runs the distributed training loop
         - Sends DONE to all workers
         """
-        overall_start = time.time()
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((self.host, self.port))
@@ -103,11 +90,7 @@ class Master:
         self._benchmark_workers()
 
         # Load dataset and partition proportionally to speed
-        X_train, X_test, y_train, y_test = generate_dataset(
-            n_samples=self.n_samples,
-            test_size=self.test_size,
-            random_state=self.random_state,
-        )
+        X_train, X_test, y_train, y_test = generate_dataset()
         speed_weights = [self.workers[i]["speed"] for i in sorted(self.workers)]
         shards = partition_data(X_train, y_train, self.n_workers, speed_weights)
 
@@ -140,25 +123,6 @@ class Master:
         metrics = compute_metrics(y_pred, y_test)   
         print(f"[Master] Evaluation metrics: {metrics}")
 
-        total_runtime_sec = round(time.time() - overall_start, 3)
-        summary = {
-            "total_runtime_sec": total_runtime_sec,
-            "n_workers": self.n_workers,
-            "n_epochs": self.n_epochs,
-            "lr": self.lr,
-            "n_samples": self.n_samples,
-            "benchmark_matrix_size": self.benchmark_matrix_size,
-            "worker_speeds": {
-                str(wid): round(data["speed"], 6)
-                for wid, data in self.workers.items()
-            },
-            "final_test_loss": round(float(test_loss), 6),
-            "metrics": metrics,
-            "training_log_path": self.training_log_path,
-        }
-        self._write_run_summary(summary)
-        print(f"[Master] Total runtime: {total_runtime_sec:.1f}s")
-
         # Shut down workers
         for worker_id, w in self.workers.items():
             w["conn"].sendall(encode_message(MSG_DONE, 0, {}))
@@ -174,10 +138,7 @@ class Master:
         worker has speed 1.0.
         """
         times = {}
-        bench_data = np.random.randn(
-            self.benchmark_matrix_size,
-            self.benchmark_matrix_size,
-        ).tolist()
+        bench_data = np.random.randn(100, 100).tolist()
 
         for worker_id, w in self.workers.items():
             w["conn"].sendall(
@@ -205,11 +166,7 @@ class Master:
           4. Update global model
           5. Broadcast updated weights via MODEL_UPDATE
         """
-        logger = PerformanceLogger(
-            filepath=self.training_log_path,
-            worker_ids=sorted(self.workers.keys()),
-            append=False,
-        )
+        logger = PerformanceLogger()
 
         for epoch in range(self.n_epochs):
             logger.start_epoch()
@@ -247,7 +204,11 @@ class Master:
                     encode_message(MSG_MODEL_UPDATE, 0, {"weights": updated_weights})
                 )
             
-
+            logger.log(   
+                epoch + 1,
+                avg_loss,
+                {wid: v["loss"] for wid, v in all_gradients.items()}
+            )
 
     def _aggregate_gradients(self, all_gradients: dict) -> dict:
         """Compute a batch-size-weighted average of gradients across workers.
@@ -286,12 +247,3 @@ class Master:
                         averaged[layer][param] += np.array(grads[layer][param]) * weight
 
         return averaged
-
-    def _write_run_summary(self, summary: dict):
-        """Persist run-level metrics for benchmark comparison tooling."""
-        out_dir = os.path.dirname(self.run_summary_path)
-        if out_dir:
-            os.makedirs(out_dir, exist_ok=True)
-
-        with open(self.run_summary_path, "w", encoding="utf-8") as handle:
-            json.dump(summary, handle, indent=2)
