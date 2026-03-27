@@ -19,8 +19,8 @@ def test_loss_decreases():
     2. Trains an MLP for 50 epochs using the full training set
     3. Asserts final loss < initial loss (basic sanity check)
     """
-    X_train, _, y_train, _ = generate_dataset(n_samples=500)
-    model = MLP(input_dim=20, hidden_dim=64, output_dim=5, lr=0.01)
+    X_train, _, y_train, _ = generate_dataset(n_samples=10000)
+    model = MLP(input_dim=784, hidden_dim=2048, output_dim=10, lr=0.01)
 
     losses = []
     for epoch in range(50):

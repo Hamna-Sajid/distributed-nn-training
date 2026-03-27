@@ -1,59 +1,55 @@
 """
-Dataset generation and partitioning utilities.
+Dataset loading and partitioning utilities.
 
-Uses sklearn's synthetic multi-label generator so no external files
-are needed. Partitioning supports proportional splits for heterogeneous
-workers (faster workers get larger shards).
+Downloads and loads the MNIST dataset for multi-class classification.
+MNIST has 60,000 training images of handwritten digits (0-9),
+each image is 28x28 pixels = 784 features when flattened.
+
+Partitioning supports proportional splits for heterogeneous workers.
 """
 
 import numpy as np
-from sklearn.datasets import make_multilabel_classification
+from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelBinarizer
 
 
-def generate_dataset(
-    n_samples: int = 1000,
-    n_features: int = 20,
-    n_classes: int = 5,
-    n_labels: int = 2,
-    random_state: int = 42
-) -> tuple:
-    """Generate a synthetic multi-label classification dataset.
+def generate_dataset(n_samples: int = 60000) -> tuple:
+    """Load and prepare the MNIST dataset for multi-label classification.
+
+    Downloads MNIST automatically on first run (cached after that).
+    Pixel values are normalized from [0, 255] to [0, 1].
+    Labels are one-hot encoded into 10 binary columns (one per digit).
 
     Parameters
     ----------
     n_samples : int
-        Total number of data samples to generate.
-    n_features : int
-        Number of input features per sample.
-    n_classes : int
-        Number of distinct output labels (each is binary).
-    n_labels : int
-        Average number of labels active per sample.
-    random_state : int
-        Random seed for reproducibility.
+        Number of samples to use from MNIST. Max is 70000.
+        Default is 60000 (standard MNIST training set size).
 
     Returns
     -------
-    X_train : np.ndarray of shape (n_train, n_features)
-        Training feature matrix (80% of data).
-    X_test : np.ndarray of shape (n_test, n_features)
-        Test feature matrix (20% of data).
-    y_train : np.ndarray of shape (n_train, n_classes)
-        Binary label matrix for training set.
-    y_test : np.ndarray of shape (n_test, n_classes)
-        Binary label matrix for test set.
+    X_train : np.ndarray of shape (n_train, 784)
+        Training feature matrix — flattened and normalized pixel values.
+    X_test : np.ndarray of shape (n_test, 784)
+        Test feature matrix.
+    y_train : np.ndarray of shape (n_train, 10)
+        One-hot encoded digit labels for training set.
+    y_test : np.ndarray of shape (n_test, 10)
+        One-hot encoded digit labels for test set.
     """
-    X, y = make_multilabel_classification(
-        n_samples=n_samples,
-        n_features=n_features,
-        n_classes=n_classes,
-        n_labels=n_labels,
-        random_state=random_state
-    )
-    X = X.astype(np.float32)
-    y = y.astype(np.float32)
-    return train_test_split(X, y, test_size=0.2, random_state=random_state)
+    print("[Data] Loading MNIST dataset (this may take a moment on first run)...")
+    mnist = fetch_openml("mnist_784", version=1, as_frame=False, parser="auto")
+
+    X = mnist.data[:n_samples].astype(np.float32) / 255.0  # normalize to [0,1]
+    y_raw = mnist.target[:n_samples].astype(int)
+
+    # One-hot encode labels: digit 3 → [0,0,0,1,0,0,0,0,0,0]
+    lb = LabelBinarizer()
+    y = lb.fit_transform(y_raw).astype(np.float32)
+
+    print(f"[Data] Loaded {X.shape[0]} samples, {X.shape[1]} features, {y.shape[1]} classes")
+    return train_test_split(X, y, test_size=0.1, random_state=42)
 
 
 def partition_data(
@@ -64,7 +60,7 @@ def partition_data(
 ) -> list:
     """Split data into shards for distributed workers.
 
-    Supports proportional splitting so that faster workers receive
+    Supports proportional splitting so faster workers receive
     larger data shards (heterogeneity-aware partitioning).
 
     Parameters
@@ -76,15 +72,12 @@ def partition_data(
     n_workers : int
         Number of worker nodes to partition data across.
     weights : list of float or None
-        Relative speed weights per worker (e.g., [1.0, 2.0] means
-        worker 1 gets twice the data of worker 0). If None, equal
-        split is applied.
+        Relative speed weights per worker. If None, equal split applied.
 
     Returns
     -------
     list of tuple
-        A list of (X_shard, y_shard) pairs, one per worker,
-        where X_shard is np.ndarray of shape (shard_size, n_features).
+        A list of (X_shard, y_shard) pairs, one per worker.
     """
     n_samples = X.shape[0]
 
@@ -94,15 +87,12 @@ def partition_data(
     total_weight = sum(weights)
     proportions = [w / total_weight for w in weights]
 
-    # Compute shard sizes, ensuring they sum to n_samples
     sizes = [int(p * n_samples) for p in proportions]
-    sizes[-1] += n_samples - sum(sizes)  # remainder goes to last worker
+    sizes[-1] += n_samples - sum(sizes)  # remainder to last worker
 
-    shards = []
-    start = 0
+    shards, start = [], 0
     for size in sizes:
-        end = start + size
-        shards.append((X[start:end], y[start:end]))
-        start = end
+        shards.append((X[start:start + size], y[start:start + size]))
+        start += size
 
     return shards

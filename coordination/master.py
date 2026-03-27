@@ -169,6 +169,8 @@ class Master:
         logger = PerformanceLogger()
 
         for epoch in range(self.n_epochs):
+            logger.start_epoch()
+
             # Signal all workers to start this epoch
             for w in self.workers.values():
                 w["conn"].sendall(encode_message(MSG_SYNCHRONIZE, 0, {"epoch": epoch}))
@@ -186,7 +188,6 @@ class Master:
 
             # Log per-epoch losses
             avg_loss = np.mean([v["loss"] for v in all_gradients.values()])
-            print(f"[Master] Epoch {epoch+1}/{self.n_epochs} | Avg Loss: {avg_loss:.4f}")
 
             logger.log(epoch + 1, avg_loss, {wid: v["loss"] for wid, v in all_gradients.items()})
 
@@ -202,6 +203,12 @@ class Master:
                 w["conn"].sendall(
                     encode_message(MSG_MODEL_UPDATE, 0, {"weights": updated_weights})
                 )
+            
+            logger.log(   
+                epoch + 1,
+                avg_loss,
+                {wid: v["loss"] for wid, v in all_gradients.items()}
+            )
 
     def _aggregate_gradients(self, all_gradients: dict) -> dict:
         """Compute a batch-size-weighted average of gradients across workers.
