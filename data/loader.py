@@ -39,7 +39,8 @@ def generate_dataset(n_samples: int = 60000) -> tuple:
         One-hot encoded digit labels for test set.
     """
     print("[Data] Loading MNIST dataset (this may take a moment on first run)...")
-    mnist = fetch_openml("mnist_784", version=1, as_frame=False, parser="auto")
+    
+    mnist = fetch_openml("mnist_784", version=1, as_frame=False, parser="liac-arff")
 
     X = mnist.data[:n_samples].astype(np.float32) / 255.0  # normalize to [0,1]
     y_raw = mnist.target[:n_samples].astype(int)

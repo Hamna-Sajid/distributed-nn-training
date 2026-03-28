@@ -1,62 +1,72 @@
 """
-Performance logger for distributed training.
+coordination/logger.py — Performance logger for distributed training.
 
-Writes per-epoch metrics including wall-clock timing to a CSV file.
-With large models like MNIST + 2048 neurons, timing data is essential
-to demonstrate that serialized code is slow — and that parallelism helps.
+Writes per-epoch metrics and wall-clock timing to a CSV file.
+The log() method returns the epoch duration in seconds so the master
+can collect timing data for the benchmark suite.
+
+All paths are read from config.yaml automatically.
 """
 
 import csv
 import os
 import time
 
+from config_loader import CFG
+
 
 class PerformanceLogger:
-    """Logs per-epoch training metrics and timing to a CSV file.
+    """Logs per-epoch training metrics and timing to a structured CSV file.
 
     Parameters
     ----------
-    filepath : str
-        Path to the output CSV file.
+    filepath : str or None
+        Path to the output CSV file. If None, uses
+        config paths.logs_dir/training_log.csv.
 
     Attributes
     ----------
     filepath : str
-        Path where CSV is written.
+        Resolved path where the CSV is written.
     start_time : float
-        Timestamp at logger creation — used for total elapsed time.
+        Unix timestamp at logger creation — for total elapsed time.
     epoch_start : float
-        Timestamp set at the beginning of each epoch — used for per-epoch duration.
+        Timestamp set at the start of each epoch — for per-epoch duration.
     """
 
-    def __init__(self, filepath: str = "logs/training_log.csv"):
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        self.filepath = filepath
-        self.start_time = time.time()
+    def __init__(self, filepath: str = None):
+        if filepath is None:
+            logs_dir = CFG["paths"]["logs_dir"]
+            filepath = os.path.join(logs_dir, "training_log.csv")
+
+        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+        self.filepath    = filepath
+        self.start_time  = time.time()
         self.epoch_start = self.start_time
 
-        with open(filepath, "w", newline="") as f:
+        with open(self.filepath, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow([
                 "epoch",
                 "avg_loss",
-                "epoch_duration_sec",   # how long THIS epoch took
-                "total_elapsed_sec",    # total time since training started
+                "epoch_duration_sec",
+                "total_elapsed_sec",
                 "worker0_loss",
                 "worker1_loss",
             ])
-        print(f"[Logger] Writing metrics to {filepath}")
+        print(f"[Logger] Writing to {self.filepath}")
 
     def start_epoch(self):
-        """Call this at the START of each epoch to begin timing it.
+        """Mark the start of an epoch for duration measurement.
 
-        Should be called by the master right before sending SYNCHRONIZE
-        to workers, so the full epoch duration is captured.
+        Call this at the top of the training loop, before sending
+        SYNCHRONIZE to workers, so the full round-trip time is captured.
         """
         self.epoch_start = time.time()
 
-    def log(self, epoch: int, avg_loss: float, worker_losses: dict):
-        """Append one row of metrics to the CSV file.
+    def log(self, epoch: int, avg_loss: float,
+            worker_losses: dict) -> float:
+        """Append one row of metrics and return the epoch duration.
 
         Parameters
         ----------
@@ -66,8 +76,14 @@ class PerformanceLogger:
             Master-side weighted average loss for this epoch.
         worker_losses : dict
             Maps worker_id (int) to that worker's local loss (float).
+            Missing worker IDs are logged as 0.0.
+
+        Returns
+        -------
+        float
+            Wall-clock duration of this epoch in seconds.
         """
-        now = time.time()
+        now            = time.time()
         epoch_duration = round(now - self.epoch_start, 3)
         total_elapsed  = round(now - self.start_time, 3)
 
@@ -81,5 +97,10 @@ class PerformanceLogger:
                 round(worker_losses.get(0, 0.0), 6),
                 round(worker_losses.get(1, 0.0), 6),
             ])
-        print(f"[Master] Epoch {epoch} | Loss: {avg_loss:.4f} | "
-              f"Epoch time: {epoch_duration:.1f}s | Total: {total_elapsed:.1f}s")
+
+        print(f"[Master] Epoch {epoch:>3} | "
+              f"Loss: {avg_loss:.4f} | "
+              f"Epoch: {epoch_duration:.1f}s | "
+              f"Total: {total_elapsed:.1f}s")
+
+        return epoch_duration

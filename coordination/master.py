@@ -1,22 +1,18 @@
 """
-Master node for synchronous distributed training.
+coordination/master.py — Master node for synchronous distributed training.
 
-The master is responsible for:
-  1. Accepting worker connections and benchmarking their speed
-  2. Partitioning the dataset proportionally to worker speed
-  3. Broadcasting initial model weights and data shards
-  4. Collecting gradients from all workers each iteration
-  5. Computing the weighted average gradient
-  6. Broadcasting updated model weights back to workers
+All default settings are read from config.yaml via config_loader.
+Individual parameters can be overridden in the constructor so that
+benchmark_suite.py can sweep different sample sizes without editing config.
+
+After training, run_and_return_metrics() returns a dict of all key results
+so benchmark_suite.py can save them to JSON, CSV, and Excel.
 """
 
 import socket
-import threading
 import time
 import numpy as np
 
-from coordination.logger import PerformanceLogger
-from tests.evaluate import compute_metrics
 from communication.protocol import (
     encode_message, decode_message,
     MSG_REGISTER, MSG_BENCHMARK, MSG_BENCH_RESULT,
@@ -25,225 +21,266 @@ from communication.protocol import (
 )
 from neural_network.mlp import MLP
 from data.loader import generate_dataset, partition_data
+from coordination.logger import PerformanceLogger
+from tests.evaluate import compute_metrics
+from config_loader import CFG
 
 
 class Master:
     """Coordinates distributed training across multiple worker nodes.
 
+    Default values come from config.yaml. Pass explicit arguments to
+    override specific settings (used by benchmark_suite.py).
+
     Parameters
     ----------
-    n_workers : int
-        Number of worker processes to wait for before training begins.
-    host : str
-        IP address or hostname to bind the master's server socket.
-    port : int
-        TCP port to listen on for incoming worker connections.
-    n_epochs : int
-        Number of full training epochs to run.
-    lr : float
-        Learning rate passed to the MLP and workers.
+    n_workers : int or None
+        Number of workers to wait for. None = read from config.
+    host : str or None
+        Bind address. None = read from config.
+    port : int or None
+        TCP port. None = read from config.
+    n_epochs : int or None
+        Training epochs. None = read from config.
+    lr : float or None
+        Learning rate. None = read from config.
+    n_samples : int or None
+        MNIST samples to load. None = read from config.
 
     Attributes
     ----------
     workers : dict
-        Maps worker_id (int) → {'conn': socket, 'speed': float, 'batch_size': int}
+        Maps worker_id (int) to a dict with keys:
+        conn, speed, rtt, batch_size, last_loss.
     model : MLP
         The global model maintained by the master.
     """
 
-    def __init__(self, n_workers: int = 2, host: str = "localhost",
-                 port: int = 5000, n_epochs: int = 20, lr: float = 0.01):
-        self.n_workers = n_workers
-        self.host = host
-        self.port = port
-        self.n_epochs = n_epochs
-        self.lr = lr
-        self.workers = {}
-        self.model = MLP(lr=lr)
+    def __init__(self, n_workers=None, host=None, port=None,
+                 n_epochs=None, lr=None, n_samples=None):
+        self.n_workers = n_workers if n_workers is not None else CFG["training"]["n_workers"]
+        self.host      = host      or CFG["communication"]["host"]
+        self.port      = port      or CFG["communication"]["port"]
+        self.n_epochs  = n_epochs  if n_epochs  is not None else CFG["training"]["n_epochs"]
+        self.lr        = lr        if lr        is not None else CFG["model"]["lr"]
+        self.n_samples = n_samples if n_samples is not None else CFG["dataset"]["n_samples"]
+        self.workers   = {}
+        self.model     = MLP(lr=self.lr)
 
     def run(self):
-        """Start the master: accept workers, train, shut down.
+        """Start master for a normal single run.
 
-        This is the main entry point. It sequentially:
-        - Accepts n_workers TCP connections
-        - Benchmarks each worker
-        - Loads and partitions the dataset
-        - Runs the distributed training loop
-        - Sends DONE to all workers
+        Use this from run_master.py. For benchmarking use
+        run_and_return_metrics() so results can be collected.
+        """
+        self.run_and_return_metrics()
+
+    def run_and_return_metrics(self) -> dict:
+        """Run full training and return a metrics dictionary.
+
+        Returns
+        -------
+        dict
+            Keys: final_loss, test_loss, accuracy, f1, precision, recall,
+            worker0_final_loss, worker1_final_loss, worker0_samples,
+            worker1_samples, worker0_rtt, worker1_rtt, epoch_times.
         """
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((self.host, self.port))
         server.listen(self.n_workers)
-        print(f"[Master] Listening on {self.host}:{self.port} ...")
+        print(f"\n[Master] Listening on {self.host}:{self.port} | "
+              f"{self.n_samples:,} samples | {self.n_epochs} epochs")
 
-        # Accept all workers sequentially for simplicity
+        # ── accept workers ────────────────────────────────────────────────────
         for _ in range(self.n_workers):
             conn, addr = server.accept()
             msg = decode_message(conn)
             assert msg["type"] == MSG_REGISTER
-            worker_id = msg["data"]["worker_id"]
-            self.workers[worker_id] = {"conn": conn, "speed": 1.0}
-            print(f"[Master] Worker {worker_id} connected from {addr}")
+            wid = msg["data"]["worker_id"]
+            self.workers[wid] = {
+                "conn": conn, "speed": 1.0,
+                "rtt": 0.0, "batch_size": 0, "last_loss": 0.0,
+            }
+            print(f"[Master] Worker {wid} connected from {addr}")
 
-        # Benchmark each worker to measure relative speed
+        # ── benchmark ─────────────────────────────────────────────────────────
         self._benchmark_workers()
 
-        # Load dataset and partition proportionally to speed
-        X_train, X_test, y_train, y_test = generate_dataset()
-        speed_weights = [self.workers[i]["speed"] for i in sorted(self.workers)]
+        # ── load dataset and partition ────────────────────────────────────────
+        X_train, X_test, y_train, y_test = generate_dataset(
+            n_samples=self.n_samples
+        )
+        speed_weights = [
+            self.workers[i]["speed"] for i in sorted(self.workers)
+        ]
         shards = partition_data(X_train, y_train, self.n_workers, speed_weights)
 
-        # Assign batch sizes based on shard sizes
         for i, (X_shard, _) in enumerate(shards):
             self.workers[i]["batch_size"] = X_shard.shape[0]
 
-        # Send initial weights + data shard to each worker
+        # ── send data + initial weights to each worker ────────────────────────
         initial_weights = self.model.get_weights()
-        for worker_id, (X_shard, y_shard) in enumerate(shards):
+        for wid, (X_shard, y_shard) in enumerate(shards):
             payload = {
-                "X": X_shard.tolist(),
-                "y": y_shard.tolist(),
+                "X": X_shard.tolist(), "y": y_shard.tolist(),
                 "weights": initial_weights,
-                "lr": self.lr,
-                "n_epochs": self.n_epochs,
+                "lr": self.lr, "n_epochs": self.n_epochs,
             }
-            self.workers[worker_id]["conn"].sendall(
+            self.workers[wid]["conn"].sendall(
                 encode_message(MSG_DATA_SHARD, 0, payload)
             )
-            print(f"[Master] Sent shard of size {X_shard.shape[0]} to worker {worker_id}")
+            print(f"[Master] Shard sent -> Worker {wid} "
+                  f"({X_shard.shape[0]:,} samples)")
 
-        # Run training loop
-        self._training_loop()
+        # ── training loop ─────────────────────────────────────────────────────
+        epoch_times, avg_losses = self._training_loop()
 
-        # Evaluate on test set
-        y_pred = self.model.forward(X_test)
+        # ── evaluate ──────────────────────────────────────────────────────────
+        y_pred    = self.model.forward(X_test)
         test_loss = self.model.compute_loss(y_pred, y_test)
-        print(f"\n[Master] Final test loss: {test_loss:.4f}")
-        metrics = compute_metrics(y_pred, y_test)   
-        print(f"[Master] Evaluation metrics: {metrics}")
+        metrics   = compute_metrics(y_pred, y_test)
+        print(f"\n[Master] Test loss: {test_loss:.4f} | {metrics}")
 
-        # Shut down workers
-        for worker_id, w in self.workers.items():
+        # ── shut down workers ─────────────────────────────────────────────────
+        for w in self.workers.values():
             w["conn"].sendall(encode_message(MSG_DONE, 0, {}))
             w["conn"].close()
         server.close()
 
+        return {
+            "final_loss":         round(avg_losses[-1], 6) if avg_losses else None,
+            "test_loss":          round(float(test_loss), 6),
+            "accuracy":           metrics["accuracy"],
+            "f1":                 metrics["f1"],
+            "precision":          metrics["precision"],
+            "recall":             metrics["recall"],
+            "worker0_final_loss": round(self.workers.get(0, {}).get("last_loss", 0.0), 6),
+            "worker1_final_loss": round(self.workers.get(1, {}).get("last_loss", 0.0), 6),
+            "worker0_samples":    self.workers.get(0, {}).get("batch_size", 0),
+            "worker1_samples":    self.workers.get(1, {}).get("batch_size", 0),
+            "worker0_rtt":        round(self.workers.get(0, {}).get("rtt", 0.0), 4),
+            "worker1_rtt":        round(self.workers.get(1, {}).get("rtt", 0.0), 4),
+            "epoch_times":        epoch_times,
+        }
+
     def _benchmark_workers(self):
-        """Send a small matrix task to each worker and measure round-trip time.
+        """Send a 100x100 matrix to each worker and measure RTT.
 
-        The master sends a 100x100 random matrix to each worker, asks it to
-        compute the column sums, and records the elapsed time. Relative speeds
-        are computed as the inverse of elapsed time, normalized so the fastest
-        worker has speed 1.0.
+        RTT determines relative speed ratios used for proportional
+        data partitioning. Stored in self.workers[id]['rtt'].
         """
-        times = {}
         bench_data = np.random.randn(100, 100).tolist()
+        times = {}
 
-        for worker_id, w in self.workers.items():
+        for wid, w in self.workers.items():
             w["conn"].sendall(
                 encode_message(MSG_BENCHMARK, 0, {"matrix": bench_data})
             )
-            t_start = time.time()
+            t0 = time.time()
             msg = decode_message(w["conn"])
             assert msg["type"] == MSG_BENCH_RESULT
-            times[worker_id] = time.time() - t_start
-            print(f"[Master] Worker {worker_id} benchmark RTT: {times[worker_id]:.4f}s")
+            elapsed    = time.time() - t0
+            times[wid] = elapsed
+            w["rtt"]   = round(elapsed, 4)
+            print(f"[Master] Worker {wid} RTT: {elapsed:.4f}s")
 
-        # Normalize: faster worker gets proportionally more data
         min_time = min(times.values())
-        for worker_id in self.workers:
-            self.workers[worker_id]["speed"] = min_time / times[worker_id]
-        print(f"[Master] Speed ratios: { {k: round(v['speed'], 3) for k, v in self.workers.items()} }")
+        for wid in self.workers:
+            self.workers[wid]["speed"] = min_time / times[wid]
+
+        print(f"[Master] Speed ratios: "
+              f"{ {k: round(v['speed'], 4) for k, v in self.workers.items()} }")
 
     def _training_loop(self):
         """Run synchronous gradient aggregation for n_epochs.
 
-        Each epoch:
-          1. Send SYNCHRONIZE to all workers (start signal)
-          2. Collect one GRADIENT message from every worker
-          3. Compute weighted average gradient
-          4. Update global model
-          5. Broadcast updated weights via MODEL_UPDATE
+        Returns
+        -------
+        epoch_times : list of float
+            Wall-clock seconds per epoch.
+        avg_losses : list of float
+            Master average loss per epoch.
         """
-        logger = PerformanceLogger()
+        logger      = PerformanceLogger()
+        epoch_times = []
+        avg_losses  = []
 
         for epoch in range(self.n_epochs):
             logger.start_epoch()
 
-            # Signal all workers to start this epoch
             for w in self.workers.values():
-                w["conn"].sendall(encode_message(MSG_SYNCHRONIZE, 0, {"epoch": epoch}))
+                w["conn"].sendall(
+                    encode_message(MSG_SYNCHRONIZE, 0, {"epoch": epoch})
+                )
 
-            # Collect gradients from all workers
             all_gradients = {}
-            for worker_id, w in self.workers.items():
+            for wid, w in self.workers.items():
                 msg = decode_message(w["conn"])
                 assert msg["type"] == MSG_GRADIENT
-                all_gradients[worker_id] = {
-                    "gradients": msg["data"]["gradients"],
+                all_gradients[wid] = {
+                    "gradients":  msg["data"]["gradients"],
                     "batch_size": msg["data"]["batch_size"],
-                    "loss": msg["data"]["loss"],
+                    "loss":       msg["data"]["loss"],
                 }
+                self.workers[wid]["last_loss"] = msg["data"]["loss"]
 
-            # Log per-epoch losses
-            avg_loss = np.mean([v["loss"] for v in all_gradients.values()])
+            avg_loss = float(np.mean(
+                [v["loss"] for v in all_gradients.values()]
+            ))
+            avg_losses.append(avg_loss)
 
-            logger.log(epoch + 1, avg_loss, {wid: v["loss"] for wid, v in all_gradients.items()})
-
-            # Weighted gradient average (weight = batch size)
             averaged = self._aggregate_gradients(all_gradients)
-
-            # Update global model
             self.model.apply_gradients(averaged)
 
-            # Broadcast updated weights to all workers
             updated_weights = self.model.get_weights()
             for w in self.workers.values():
                 w["conn"].sendall(
-                    encode_message(MSG_MODEL_UPDATE, 0, {"weights": updated_weights})
+                    encode_message(MSG_MODEL_UPDATE, 0,
+                                   {"weights": updated_weights})
                 )
-            
-            logger.log(   
-                epoch + 1,
-                avg_loss,
+
+            duration = logger.log(
+                epoch + 1, avg_loss,
                 {wid: v["loss"] for wid, v in all_gradients.items()}
             )
+            epoch_times.append(duration)
+
+        return epoch_times, avg_losses
 
     def _aggregate_gradients(self, all_gradients: dict) -> dict:
-        """Compute a batch-size-weighted average of gradients across workers.
-
-        Weighted average formula:
-            g_avg = sum(batch_i * g_i) / sum(batch_i)
+        """Compute batch-size-weighted average of gradients across workers.
 
         Parameters
         ----------
         all_gradients : dict
-            Maps worker_id → {'gradients': dict, 'batch_size': int, 'loss': float}
+            Maps worker_id -> {gradients, batch_size, loss}.
 
         Returns
         -------
         dict
-            Averaged gradients in the same nested structure as MLP.backward().
+            Averaged gradients in the same structure as MLP.backward().
         """
-        total_samples = sum(v["batch_size"] for v in all_gradients.values())
+        total    = sum(v["batch_size"] for v in all_gradients.values())
         averaged = None
 
-        for worker_id, data in all_gradients.items():
-            weight = data["batch_size"] / total_samples
-            grads = data["gradients"]
+        for wid, data in all_gradients.items():
+            weight = data["batch_size"] / total
+            grads  = data["gradients"]
 
             if averaged is None:
                 averaged = {
                     layer: {
-                        param: np.array(val) * weight
-                        for param, val in params.items()
+                        p: np.array(val) * weight
+                        for p, val in params.items()
                     }
                     for layer, params in grads.items()
                 }
             else:
                 for layer in averaged:
-                    for param in averaged[layer]:
-                        averaged[layer][param] += np.array(grads[layer][param]) * weight
+                    for p in averaged[layer]:
+                        averaged[layer][p] += (
+                            np.array(grads[layer][p]) * weight
+                        )
 
         return averaged
