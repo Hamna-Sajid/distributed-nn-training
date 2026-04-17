@@ -25,6 +25,9 @@ from coordination.logger import PerformanceLogger
 from tests.evaluate import compute_metrics
 from config_loader import CFG
 
+from coordination.sync_barrier import SyncBarrier
+from coordination.adaptive_aggregator import AdaptiveAggregator
+
 
 class Master:
     """Coordinates distributed training across multiple worker nodes.
@@ -206,33 +209,46 @@ class Master:
         epoch_times = []
         avg_losses  = []
 
-        for epoch in range(self.n_epochs):
-            logger.start_epoch()
+        barrier = SyncBarrier(
+            n_workers=len(self.workers),
+            timeout_sec=CFG["communication"]["timeout_sec"]
+        )
+        aggregator = AdaptiveAggregator(
+            norm_clip_threshold=10.0,   # tune this if needed
+            staleness_penalty=0.5       # tune this — 0.5 means slow worker = half weight
+        )
 
+        for epoch in range(self.n_epochs):
+            epoch_start = time.time()
+
+            # 1. Broadcast SYNCHRONIZE to all workers
             for w in self.workers.values():
                 w["conn"].sendall(
                     encode_message(MSG_SYNCHRONIZE, 0, {"epoch": epoch})
                 )
 
-            all_gradients = {}
-            for wid, w in self.workers.items():
-                msg = decode_message(w["conn"])
-                assert msg["type"] == MSG_GRADIENT
-                all_gradients[wid] = {
-                    "gradients":  msg["data"]["gradients"],
-                    "batch_size": msg["data"]["batch_size"],
-                    "loss":       msg["data"]["loss"],
-                }
-                self.workers[wid]["last_loss"] = msg["data"]["loss"]
+            # 2. Wait at barrier for all GRADIENT messages
+            barrier_result = barrier.collect_gradients(
+                {wid: w["conn"] for wid, w in self.workers.items()},
+                decode_message
+            )
 
-            avg_loss = float(np.mean(
-                [v["loss"] for v in all_gradients.values()]
-            ))
-            avg_losses.append(avg_loss)
+            # 3. Adaptive aggregation
+            agg_gradients, worker_weights = aggregator.aggregate(
+                gradients=barrier_result['gradients'],
+                batch_sizes=barrier_result['batch_sizes'],
+                losses=barrier_result['losses'],
+                arrival_times=barrier_result['timing']
+            )
 
-            averaged = self._aggregate_gradients(all_gradients)
-            self.model.apply_gradients(averaged)
+            # Update last_loss for workers
+            for wid, loss in barrier_result['losses'].items():
+                self.workers[wid]["last_loss"] = loss
 
+            # 4. Apply aggregated gradients to global model
+            self.model.apply_gradients(agg_gradients)
+
+            # 5. Broadcast MODEL_UPDATE to all workers
             updated_weights = self.model.get_weights()
             for w in self.workers.values():
                 w["conn"].sendall(
@@ -240,47 +256,17 @@ class Master:
                                    {"weights": updated_weights})
                 )
 
-            duration = logger.log(
+            epoch_time = time.time() - epoch_start
+            avg_loss = aggregator.history[-1]['avg_loss']
+            avg_losses.append(avg_loss)
+            epoch_times.append(epoch_time)
+
+            logger.log(
                 epoch + 1, avg_loss,
-                {wid: v["loss"] for wid, v in all_gradients.items()}
+                {wid: loss for wid, loss in barrier_result['losses'].items()}
             )
-            epoch_times.append(duration)
+
+            print(f"Epoch {epoch+1}/{self.n_epochs} | loss: {avg_loss:.4f} | "
+                  f"time: {epoch_time:.2f}s | weights: {worker_weights}")
 
         return epoch_times, avg_losses
-
-    def _aggregate_gradients(self, all_gradients: dict) -> dict:
-        """Compute batch-size-weighted average of gradients across workers.
-
-        Parameters
-        ----------
-        all_gradients : dict
-            Maps worker_id -> {gradients, batch_size, loss}.
-
-        Returns
-        -------
-        dict
-            Averaged gradients in the same structure as MLP.backward().
-        """
-        total    = sum(v["batch_size"] for v in all_gradients.values())
-        averaged = None
-
-        for wid, data in all_gradients.items():
-            weight = data["batch_size"] / total
-            grads  = data["gradients"]
-
-            if averaged is None:
-                averaged = {
-                    layer: {
-                        p: np.array(val) * weight
-                        for p, val in params.items()
-                    }
-                    for layer, params in grads.items()
-                }
-            else:
-                for layer in averaged:
-                    for p in averaged[layer]:
-                        averaged[layer][p] += (
-                            np.array(grads[layer][p]) * weight
-                        )
-
-        return averaged
