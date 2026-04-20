@@ -222,52 +222,58 @@ class Master:
         for epoch in range(self.n_epochs):
             epoch_start = time.time()
 
-            # 1. Broadcast SYNCHRONIZE to all workers
-            for w in self.workers.values():
-                w["conn"].sendall(
-                    encode_message(MSG_SYNCHRONIZE, 0, {"epoch": epoch})
+            try:
+                # 1. Broadcast SYNCHRONIZE to all workers
+                for w in self.workers.values():
+                    w["conn"].sendall(
+                        encode_message(MSG_SYNCHRONIZE, 0, {"epoch": epoch})
+                    )
+
+                # 2. Wait at barrier for all GRADIENT messages
+                barrier_result = barrier.collect_gradients(
+                    {wid: w["conn"] for wid, w in self.workers.items()},
+                    recv_gradient_message
                 )
 
-            # 2. Wait at barrier for all GRADIENT messages
-            barrier_result = barrier.collect_gradients(
-                {wid: w["conn"] for wid, w in self.workers.items()},
-                recv_gradient_message
-            )
-
-            # 3. Adaptive aggregation
-            agg_gradients, worker_weights = aggregator.aggregate(
-                gradients=barrier_result['gradients'],
-                batch_sizes=barrier_result['batch_sizes'],
-                losses=barrier_result['losses'],
-                arrival_times=barrier_result['timing']
-            )
-
-            # Update last_loss for workers
-            for wid, loss in barrier_result['losses'].items():
-                self.workers[wid]["last_loss"] = loss
-
-            # 4. Apply aggregated gradients to global model
-            self.model.apply_gradients(agg_gradients)
-
-            # 5. Broadcast MODEL_UPDATE to all workers
-            updated_weights = self.model.get_weights()
-            for w in self.workers.values():
-                w["conn"].sendall(
-                    encode_message(MSG_MODEL_UPDATE, 0,
-                                   {"weights": updated_weights})
+                # 3. Adaptive aggregation
+                agg_gradients, worker_weights = aggregator.aggregate(
+                    gradients=barrier_result['gradients'],
+                    batch_sizes=barrier_result['batch_sizes'],
+                    losses=barrier_result['losses'],
+                    arrival_times=barrier_result['timing']
                 )
 
-            epoch_time = time.time() - epoch_start
-            avg_loss = aggregator.history[-1]['avg_loss']
-            avg_losses.append(avg_loss)
-            epoch_times.append(epoch_time)
+                # Update last_loss for workers
+                for wid, loss in barrier_result['losses'].items():
+                    self.workers[wid]["last_loss"] = loss
 
-            logger.log(
-                epoch + 1, avg_loss,
-                {wid: loss for wid, loss in barrier_result['losses'].items()}
-            )
+                # 4. Apply aggregated gradients to global model
+                self.model.apply_gradients(agg_gradients)
 
-            print(f"Epoch {epoch+1}/{self.n_epochs} | loss: {avg_loss:.4f} | "
-                  f"time: {epoch_time:.2f}s | weights: {worker_weights}")
+                # 5. Broadcast MODEL_UPDATE to all workers
+                updated_weights = self.model.get_weights()
+                for w in self.workers.values():
+                    w["conn"].sendall(
+                        encode_message(MSG_MODEL_UPDATE, 0,
+                                       {"weights": updated_weights})
+                    )
+
+                epoch_time = time.time() - epoch_start
+                avg_loss = aggregator.history[-1]['avg_loss']
+                avg_losses.append(avg_loss)
+                epoch_times.append(epoch_time)
+
+                logger.log(
+                    epoch + 1, avg_loss,
+                    {wid: loss for wid, loss in barrier_result['losses'].items()}
+                )
+
+                print(f"Epoch {epoch+1}/{self.n_epochs} | loss: {avg_loss:.4f} | "
+                      f"time: {epoch_time:.2f}s | weights: {worker_weights}")
+            except Exception as e:
+                print(f"[Master] Error in epoch {epoch+1}: {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
 
         return epoch_times, avg_losses

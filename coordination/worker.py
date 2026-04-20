@@ -136,42 +136,54 @@ class Worker:
             Number of training epochs, must match master's n_epochs.
         """
         for epoch in range(n_epochs):
-            # Wait for master to signal start of this epoch
-            msg = decode_message(self.conn)
+            try:
+                # Wait for master to signal start of this epoch
+                msg = decode_message(self.conn)
 
-            if msg["type"] == MSG_DONE:
-                print(f"[Worker {self.worker_id}] Received DONE early, stopping.")
-                return
+                if msg["type"] == MSG_DONE:
+                    print(f"[Worker {self.worker_id}] Received DONE early, stopping.")
+                    return
 
-            assert msg["type"] == MSG_SYNCHRONIZE
+                assert msg["type"] == MSG_SYNCHRONIZE
 
-            # Optional artificial delay to simulate slow computation
-            if self.artificial_delay > 0:
-                time.sleep(self.artificial_delay)
+                # Optional artificial delay to simulate slow computation
+                if self.artificial_delay > 0:
+                    time.sleep(self.artificial_delay)
 
-            # Forward + backward pass on local shard
-            y_pred = self.model.forward(self.X)
-            loss = self.model.compute_loss(y_pred, self.y)
-            gradients = self.model.backward(y_pred, self.y)
+                # Forward + backward pass on local shard
+                y_pred = self.model.forward(self.X)
+                loss = self.model.compute_loss(y_pred, self.y)
+                gradients = self.model.backward(y_pred, self.y)
 
-            print(f"[Worker {self.worker_id}] Epoch {epoch+1} | Loss: {loss:.4f}")
+                print(f"[Worker {self.worker_id}] Epoch {epoch+1} | Loss: {loss:.4f}")
 
-            # Send gradients and metadata to master (with optional compression)
-            from config_loader import load_config
-            config = load_config()
-            compression_config = config.get("communication", {}).get("compression", {})
-            
-            send_gradient_message(
-                self.conn, self.worker_id,
-                gradients=gradients,
-                batch_size=self.X.shape[0],
-                loss=loss,
-                compression_enabled=compression_config.get("enabled", False),
-                compression_type=compression_config.get("type", "int8"),
-                log_stats=compression_config.get("log_stats", False)
-            )
+                # Send gradients and metadata to master (with optional compression)
+                from config_loader import load_config
+                config = load_config()
+                compression_config = config.get("communication", {}).get("compression", {})
+                
+                send_gradient_message(
+                    self.conn, self.worker_id,
+                    gradients=gradients,
+                    batch_size=self.X.shape[0],
+                    loss=loss,
+                    compression_enabled=compression_config.get("enabled", False),
+                    compression_type=compression_config.get("type", "int8"),
+                    log_stats=compression_config.get("log_stats", False)
+                )
 
-            # Receive updated model weights from master
-            msg = decode_message(self.conn)
-            assert msg["type"] == MSG_MODEL_UPDATE
-            self.model.set_weights(msg["data"]["weights"])
+                # Receive updated model weights from master
+                msg = decode_message(self.conn)
+                if msg["type"] == MSG_DONE:
+                    print(f"[Worker {self.worker_id}] Received DONE, stopping.")
+                    return
+                assert msg["type"] == MSG_MODEL_UPDATE
+                self.model.set_weights(msg["data"]["weights"])
+            except ConnectionError as e:
+                print(f"[Worker {self.worker_id}] Connection error in epoch {epoch+1}: {e}")
+                raise
+            except Exception as e:
+                print(f"[Worker {self.worker_id}] Unexpected error in epoch {epoch+1}: {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
+                raise

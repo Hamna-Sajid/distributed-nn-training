@@ -1,0 +1,41 @@
+[
+  {
+    "test": "accuracy_under_heterogeneity",
+    "accuracy": 0.11,
+    "f1": 0.0779,
+    "final_loss": 0.685322,
+    "time_sec": 189.57,
+    "worker0_samples": 1796,
+    "worker1_samples": 4
+  },
+  {
+    "test": "convergence_speed",
+    "fast_time_sec": 176.8,
+    "slow_time_sec": 184.18,
+    "speedup_ratio": 1.042,
+    "fast_final_loss": 0.685421,
+    "slow_final_loss": 0.685754
+  },
+  {
+    "test": "throughput_variable_vs_fixed",
+    "variable_batch_time": 137.77,
+    "fixed_batch_time": 122.67,
+    "variable_throughput_sps": 43.6,
+    "fixed_throughput_sps": 48.9,
+    "worker0_samples_var": 1795,
+    "worker1_samples_var": 5
+  },
+  {
+    "test": "compression_baseline",
+    "accuracy": 0.09,
+    "f1": 0.0491,
+    "final_loss": 0.68569,
+    "time_sec": 184.88
+  },
+  {
+    "test": "adaptive_norm_clipping",
+    "weight_normal_worker": 0.5712000131607056,
+    "weight_exploding_worker": 0.42879998683929443,
+    "passed": true
+  }
+]

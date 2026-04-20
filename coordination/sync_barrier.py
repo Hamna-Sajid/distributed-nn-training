@@ -72,6 +72,7 @@ class SyncBarrier:
         for t in threads:
             remaining = deadline - time.time()
             if remaining <= 0:
+                print(f"[SyncBarrier] Timeout reached, some workers may not have completed")
                 break
             t.join(timeout=remaining)
 

@@ -63,8 +63,8 @@ class AdaptiveAggregator:
             # Flatten all gradient arrays and compute overall L2 norm
             all_vals = []
             for layer in grad_dict.values():
-                all_vals.append(layer['weights'].flatten())
-                all_vals.append(layer['biases'].flatten())
+                all_vals.append(layer['dW'].flatten())
+                all_vals.append(layer['db'].flatten())
             return np.linalg.norm(np.concatenate(all_vals))
 
         norms = {wid: grad_norm(gradients[wid]) for wid in valid_workers}
@@ -107,8 +107,8 @@ class AdaptiveAggregator:
         first = gradients[valid_workers[0]]
         aggregated = {
             layer: {
-                'weights': np.zeros_like(first[layer]['weights']),
-                'biases': np.zeros_like(first[layer]['biases'])
+                'dW': np.zeros_like(first[layer]['dW']),
+                'db': np.zeros_like(first[layer]['db'])
             }
             for layer in first.keys()
         }
@@ -116,8 +116,8 @@ class AdaptiveAggregator:
         for wid in valid_workers:
             w = adaptive_weights[wid]
             for layer in aggregated.keys():
-                aggregated[layer]['weights'] += w * gradients[wid][layer]['weights']
-                aggregated[layer]['biases']  += w * gradients[wid][layer]['biases']
+                aggregated[layer]['dW'] += w * gradients[wid][layer]['dW']
+                aggregated[layer]['db']  += w * gradients[wid][layer]['db']
 
         # Log this epoch's stats
         avg_loss = sum(losses[wid] * base_weights[wid] for wid in valid_workers)
