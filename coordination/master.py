@@ -15,6 +15,7 @@ import numpy as np
 
 from communication.protocol import (
     encode_message, decode_message,
+    recv_gradient_message,
     MSG_REGISTER, MSG_BENCHMARK, MSG_BENCH_RESULT,
     MSG_DATA_SHARD, MSG_GRADIENT, MSG_MODEL_UPDATE,
     MSG_SYNCHRONIZE, MSG_DONE
@@ -188,7 +189,7 @@ class Master:
             w["rtt"]   = round(elapsed, 4)
             print(f"[Master] Worker {wid} RTT: {elapsed:.4f}s")
 
-        min_time = min(times.values())
+        min_time = max(min(times.values()), 1e-6)
         for wid in self.workers:
             self.workers[wid]["speed"] = min_time / times[wid]
 
@@ -230,7 +231,7 @@ class Master:
             # 2. Wait at barrier for all GRADIENT messages
             barrier_result = barrier.collect_gradients(
                 {wid: w["conn"] for wid, w in self.workers.items()},
-                decode_message
+                recv_gradient_message
             )
 
             # 3. Adaptive aggregation

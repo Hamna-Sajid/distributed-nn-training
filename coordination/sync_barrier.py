@@ -22,11 +22,11 @@ class SyncBarrier:
 
     def collect_gradients(self, worker_connections, recv_message_fn):
         """
-        Wait for GRADIENT messages from all workers.
+        Wait for GRADIENT messages from all workers (compressed or uncompressed).
         
         Args:
             worker_connections: dict of {worker_id: socket}
-            recv_message_fn: the protocol.recv_message function from your codebase
+            recv_message_fn: the protocol.recv_gradient_message function (handles compression)
         
         Returns:
             dict with keys 'gradients', 'batch_sizes', 'losses', 'timing'
@@ -48,12 +48,13 @@ class SyncBarrier:
 
         def recv_from_worker(worker_id, conn):
             try:
-                msg = recv_message_fn(conn)
+                # recv_gradient_message handles both compressed and uncompressed
+                grad_msg = recv_message_fn(conn)
                 arrival = time.time() - barrier_start
                 with lock:
-                    self._gradients[worker_id] = msg['data']['gradients']
-                    self._batch_sizes[worker_id] = msg['data']['batch_size']
-                    self._losses[worker_id] = msg['data']['loss']
+                    self._gradients[worker_id] = grad_msg['gradients']
+                    self._batch_sizes[worker_id] = grad_msg['batch_size']
+                    self._losses[worker_id] = grad_msg['loss']
                     self._arrival_times[worker_id] = arrival
             except Exception as e:
                 print(f"[SyncBarrier] Worker {worker_id} failed: {e}")

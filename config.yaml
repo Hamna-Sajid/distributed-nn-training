@@ -29,8 +29,14 @@ dataset:
 communication:
   host:        localhost
   port:        5000
-  timeout_sec: 300
-
+  timeout_sec: 300  
+  # Gradient Compression Settings
+  compression:
+    enabled:              true          # Enable/disable gradient compression
+    type:                 int8          # 'int8', 'int16', or 'none'
+    sparsification:       false         # Enable top-k sparsification (experimental)
+    sparsity_percentile:  90            # Keep top (100 - percentile)% of gradients
+    log_stats:            true          # Log compression stats to console
 # ── Benchmark suite ───────────────────────────────────────────────────────────
 benchmark:
   sample_sizes: [10000, 20000, 40000, 60000]

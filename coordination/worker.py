@@ -15,6 +15,7 @@ import numpy as np
 
 from communication.protocol import (
     encode_message, decode_message,
+    send_gradient_message, recv_gradient_message,
     MSG_REGISTER, MSG_BENCHMARK, MSG_BENCH_RESULT,
     MSG_DATA_SHARD, MSG_GRADIENT, MSG_MODEL_UPDATE,
     MSG_SYNCHRONIZE, MSG_DONE
@@ -155,13 +156,19 @@ class Worker:
 
             print(f"[Worker {self.worker_id}] Epoch {epoch+1} | Loss: {loss:.4f}")
 
-            # Send gradients and metadata to master
-            self.conn.sendall(
-                encode_message(MSG_GRADIENT, self.worker_id, {
-                    "gradients": gradients,
-                    "batch_size": self.X.shape[0],
-                    "loss": loss,
-                })
+            # Send gradients and metadata to master (with optional compression)
+            from config_loader import load_config
+            config = load_config()
+            compression_config = config.get("communication", {}).get("compression", {})
+            
+            send_gradient_message(
+                self.conn, self.worker_id,
+                gradients=gradients,
+                batch_size=self.X.shape[0],
+                loss=loss,
+                compression_enabled=compression_config.get("enabled", False),
+                compression_type=compression_config.get("type", "int8"),
+                log_stats=compression_config.get("log_stats", False)
             )
 
             # Receive updated model weights from master
