@@ -1,0 +1,80 @@
+# =============================================================================
+# config.yaml — Global settings for distributed-nn-training
+#
+# Every module reads from this file via config_loader.py.
+# Change values here instead of editing source files.
+# =============================================================================
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model:
+  input_dim:  784
+  hidden_dim: 2048
+  output_dim: 10
+  num_hidden_layers: 3
+  lr:         0.01
+
+# ── Training ──────────────────────────────────────────────────────────────────
+training:
+  n_epochs:  10
+  n_workers: 2
+
+# ── Dataset ───────────────────────────────────────────────────────────────────
+dataset:
+  name:         mnist
+  n_samples:    10000
+  test_split:   0.1
+  random_state: 42
+
+# ── Communication ─────────────────────────────────────────────────────────────
+communication:
+  host:        localhost
+  port:        5000
+  timeout_sec: 300  
+  # Gradient Compression Settings
+  compression:
+    enabled:              true          # Enable/disable gradient compression
+    type:                 int8          # 'int8', 'int16', or 'none'
+    sparsification:       false         # Enable top-k sparsification (experimental)
+    sparsity_percentile:  90            # Keep top (100 - percentile)% of gradients
+    log_stats:            true          # Log compression stats to console# ── Heterogeneity Handling ───────────────────────────────────────────────────
+heterogeneity:
+  # Variable Batch Sizes
+  batch_size:
+    enabled:           true            # Use variable batch sizes
+    base_batch_size:   32              # Base batch size for slowest worker
+    min_batch_size:    8               # Minimum batch size to avoid tiny batches
+  
+  # Network Simulation
+  network:
+    enabled:           false           # Enable network simulation
+    packet_loss_rate:  0.0             # Probability of packet loss (0.0-1.0)
+    # Per-worker network conditions (optional, override defaults)
+    # worker_conditions:
+    #   0: "fast_lan"      # Worker 0: 1ms latency
+    #   1: "slow_wan"      # Worker 1: 50ms latency
+  
+  # Data Skew / Non-IID Distribution
+  data_skew:
+    enabled:           false           # Enable data skew simulation
+    type:              "quantity_skew" # 'uniform', 'class_imbalance', 'quantity_skew', 'combined'
+    # For quantity_skew: samples per worker (must sum to dataset.n_samples or will be normalized)
+    # quantity_distribution: {0: 9000, 1: 1000}  # Worker 0: 90%, Worker 1: 10%
+    
+    # For class_imbalance: class probabilities per worker
+    # class_distribution: {0: [0.9, 0.1], 1: [0.5, 0.5]}  # Binary classification example
+  
+  # Metrics and Logging
+  analysis:
+    enabled:           true            # Enable heterogeneity analysis logging
+    detailed_logging:  false           # Log per-worker metrics every iteration
+    # ── Benchmark suite ───────────────────────────────────────────────────────────
+benchmark:
+  sample_sizes: [10000, 20000, 40000, 60000]
+  n_epochs_per_run: 5
+  port_start: 5100
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+paths:
+  logs_dir:       logs
+  graphs_dir:     graphs
+  benchmark_dir:  benchmark_results

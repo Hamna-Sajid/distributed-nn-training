@@ -1,0 +1,26 @@
+{
+  "n_samples": 20000,
+  "n_epochs": 5,
+  "total_time_sec": 282.77,
+  "avg_time_per_epoch_sec": 56.55,
+  "final_loss": 0.685283,
+  "test_loss": 0.683411,
+  "accuracy": 0.0,
+  "f1": 0.0,
+  "precision": 0.0,
+  "recall": 0.0,
+  "worker0_final_loss": 0.685358,
+  "worker1_final_loss": 0.685208,
+  "worker0_samples": 17960,
+  "worker1_samples": 40,
+  "worker0_rtt": 0.0045,
+  "worker1_rtt": 2.0076,
+  "epoch_times": [
+    47.619,
+    49.114,
+    48.088,
+    49.225,
+    40.192
+  ],
+  "status": "ok"
+}
