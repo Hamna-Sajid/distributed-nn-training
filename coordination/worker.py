@@ -73,8 +73,27 @@ class Worker:
           6. Terminate on DONE
         """
         self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.conn.connect((self.master_host, self.master_port))
-        print(f"[Worker {self.worker_id}] Connected to master.")
+        
+        # Connect with retry logic (master may not be ready immediately)
+        max_retries = 10
+        retry_delay = 0.5
+        last_error = None
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                self.conn.connect((self.master_host, self.master_port))
+                print(f"[Worker {self.worker_id}] Connected to master.")
+                break
+            except ConnectionRefusedError as e:
+                last_error = e
+                if attempt < max_retries:
+                    wait_time = retry_delay * (2 ** (attempt - 1))  # exponential backoff
+                    print(f"[Worker {self.worker_id}] Connection attempt {attempt}/{max_retries} failed. "
+                          f"Retrying in {wait_time:.1f}s...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"[Worker {self.worker_id}] Failed to connect after {max_retries} attempts.")
+                    raise last_error
 
         # Register with master
         self.conn.sendall(

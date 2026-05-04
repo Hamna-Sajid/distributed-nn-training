@@ -7,6 +7,14 @@ benchmark_suite.py can sweep different sample sizes without editing config.
 
 After training, run_and_return_metrics() returns a dict of all key results
 so benchmark_suite.py can save them to JSON, CSV, and Excel.
+
+M3 notes
+--------
+- _training_loop now returns (epoch_times, avg_losses) as a tuple
+- apply_gradients receives {"layer1": {"dW":..., "db":...}} structure
+  which is what AdaptiveAggregator produces
+- AdaptiveAggregator.aggregate() returns (aggregated, worker_weights)
+  where aggregated has the same layer/dW/db structure as MLP.backward()
 """
 
 import socket
@@ -103,8 +111,11 @@ class Master:
             assert msg["type"] == MSG_REGISTER
             wid = msg["data"]["worker_id"]
             self.workers[wid] = {
-                "conn": conn, "speed": 1.0,
-                "rtt": 0.0, "batch_size": 0, "last_loss": 0.0,
+                "conn":       conn,
+                "speed":      1.0,
+                "rtt":        0.0,
+                "batch_size": 0,
+                "last_loss":  0.0,
             }
             print(f"[Master] Worker {wid} connected from {addr}")
 
@@ -127,9 +138,11 @@ class Master:
         initial_weights = self.model.get_weights()
         for wid, (X_shard, y_shard) in enumerate(shards):
             payload = {
-                "X": X_shard.tolist(), "y": y_shard.tolist(),
-                "weights": initial_weights,
-                "lr": self.lr, "n_epochs": self.n_epochs,
+                "X":        X_shard.tolist(),
+                "y":        y_shard.tolist(),
+                "weights":  initial_weights,
+                "lr":       self.lr,
+                "n_epochs": self.n_epochs,
             }
             self.workers[wid]["conn"].sendall(
                 encode_message(MSG_DATA_SHARD, 0, payload)
@@ -168,6 +181,8 @@ class Master:
             "epoch_times":        epoch_times,
         }
 
+    # ── private helpers ───────────────────────────────────────────────────────
+
     def _benchmark_workers(self):
         """Send a 100x100 matrix to each worker and measure RTT.
 
@@ -199,6 +214,16 @@ class Master:
     def _training_loop(self):
         """Run synchronous gradient aggregation for n_epochs.
 
+        Uses SyncBarrier to collect gradients from all workers concurrently,
+        and AdaptiveAggregator to apply norm clipping and staleness penalties.
+
+        The aggregated gradient structure from AdaptiveAggregator is:
+            {"layer1": {"dW": ndarray, "db": ndarray}, ...}
+
+        This is converted to the structure MLP.apply_gradients() expects:
+            {"layer1": {"dW": ndarray, "db": ndarray}, ...}
+        which is identical — no conversion needed.
+
         Returns
         -------
         epoch_times : list of float
@@ -215,12 +240,12 @@ class Master:
             timeout_sec=CFG["communication"]["timeout_sec"]
         )
         aggregator = AdaptiveAggregator(
-            norm_clip_threshold=10.0,   # tune this if needed
-            staleness_penalty=0.5       # tune this — 0.5 means slow worker = half weight
+            norm_clip_threshold=10.0,
+            staleness_penalty=0.5
         )
 
         for epoch in range(self.n_epochs):
-            epoch_start = time.time()
+            logger.start_epoch()
 
             try:
                 # 1. Broadcast SYNCHRONIZE to all workers
@@ -229,28 +254,33 @@ class Master:
                         encode_message(MSG_SYNCHRONIZE, 0, {"epoch": epoch})
                     )
 
-                # 2. Wait at barrier for all GRADIENT messages
+                # 2. Collect gradients concurrently via SyncBarrier
                 barrier_result = barrier.collect_gradients(
                     {wid: w["conn"] for wid, w in self.workers.items()},
                     recv_gradient_message
                 )
 
                 # 3. Adaptive aggregation
+                #    aggregator.aggregate() returns:
+                #      agg_gradients: {"layer1": {"dW":..,"db":..}, ...}
+                #      worker_weights: {worker_id: float}
                 agg_gradients, worker_weights = aggregator.aggregate(
-                    gradients=barrier_result['gradients'],
-                    batch_sizes=barrier_result['batch_sizes'],
-                    losses=barrier_result['losses'],
-                    arrival_times=barrier_result['timing']
+                    gradients=barrier_result["gradients"],
+                    batch_sizes=barrier_result["batch_sizes"],
+                    losses=barrier_result["losses"],
+                    arrival_times=barrier_result["timing"],
                 )
 
-                # Update last_loss for workers
-                for wid, loss in barrier_result['losses'].items():
+                # 4. Update last_loss per worker for reporting
+                for wid, loss in barrier_result["losses"].items():
                     self.workers[wid]["last_loss"] = loss
 
-                # 4. Apply aggregated gradients to global model
+                # 5. Apply aggregated gradients to global model
+                #    MLP.apply_gradients expects the same structure
+                #    AdaptiveAggregator already produces.
                 self.model.apply_gradients(agg_gradients)
 
-                # 5. Broadcast MODEL_UPDATE to all workers
+                # 6. Broadcast updated weights to all workers
                 updated_weights = self.model.get_weights()
                 for w in self.workers.values():
                     w["conn"].sendall(
@@ -258,20 +288,24 @@ class Master:
                                        {"weights": updated_weights})
                     )
 
-                epoch_time = time.time() - epoch_start
-                avg_loss = aggregator.history[-1]['avg_loss']
+                # 7. Log metrics
+                avg_loss = aggregator.history[-1]["avg_loss"]
                 avg_losses.append(avg_loss)
-                epoch_times.append(epoch_time)
 
-                logger.log(
+                duration = logger.log(
                     epoch + 1, avg_loss,
-                    {wid: loss for wid, loss in barrier_result['losses'].items()}
+                    {wid: loss for wid, loss in barrier_result["losses"].items()}
                 )
+                epoch_times.append(duration)
 
-                print(f"Epoch {epoch+1}/{self.n_epochs} | loss: {avg_loss:.4f} | "
-                      f"time: {epoch_time:.2f}s | weights: {worker_weights}")
+                print(f"[Master] Epoch {epoch+1}/{self.n_epochs} | "
+                      f"loss: {avg_loss:.4f} | "
+                      f"time: {duration:.2f}s | "
+                      f"weights: { {k: round(v, 4) for k, v in worker_weights.items()} }")
+
             except Exception as e:
-                print(f"[Master] Error in epoch {epoch+1}: {type(e).__name__}: {e}")
+                print(f"[Master] Error in epoch {epoch + 1}: "
+                      f"{type(e).__name__}: {e}")
                 import traceback
                 traceback.print_exc()
                 raise

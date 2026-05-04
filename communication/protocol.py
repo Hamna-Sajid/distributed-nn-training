@@ -51,18 +51,6 @@ def get_compression_stats() -> dict:
     return dict(_compression_stats)
 
 
-# ---------------------------------------------------------------------------
-# Message type constants
-# ---------------------------------------------------------------------------
-MSG_REGISTER = "REGISTER"
-MSG_BENCHMARK = "BENCHMARK"
-MSG_BENCH_RESULT = "BENCH_RESULT"
-MSG_DATA_SHARD = "DATA_SHARD"
-MSG_GRADIENT = "GRADIENT"
-MSG_MODEL_UPDATE = "MODEL_UPDATE"
-MSG_SYNCHRONIZE = "SYNCHRONIZE"
-MSG_DONE = "DONE"
-
 
 def _numpy_to_lists(obj):
     """Recursively convert numpy arrays to nested Python lists for JSON.
