@@ -1,0 +1,23 @@
+{
+  "n_workers": 1,
+  "n_samples": 40000,
+  "n_epochs": 5,
+  "total_time_sec": 174.3,
+  "avg_epoch_sec": 28.47,
+  "final_loss": 0.6856,
+  "test_loss": 0.683672,
+  "accuracy": 0.0867,
+  "f1": 0.0656,
+  "worker0_samples": 36000,
+  "worker1_samples": 0,
+  "throughput_sps": 1147.4,
+  "epoch_times": [
+    32.371,
+    28.715,
+    27.068,
+    26.729,
+    27.446
+  ],
+  "status": "ok",
+  "timestamp": "2026-05-04T21:31:08.813425"
+}
