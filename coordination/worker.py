@@ -12,6 +12,9 @@ Each worker:
 import socket
 import time
 import numpy as np
+import os
+from config_loader import CFG
+
 
 from communication.protocol import (
     encode_message, decode_message,
@@ -50,16 +53,44 @@ class Worker:
         Local data shard label matrix.
     """
 
-    def __init__(self, worker_id: int, master_host: str = "localhost",
-                 master_port: int = 5000, artificial_delay: float = 0.0):
-        self.worker_id = worker_id
-        self.master_host = master_host
-        self.master_port = master_port
-        self.artificial_delay = artificial_delay
-        self.conn = None
+    # def __init__(self, worker_id: int,
+    #          master_host: str = None,
+    #          master_port: int = None,
+    #          artificial_delay: float = None):
+    #     self.worker_id   = worker_id
+    #     # Read from env first (Docker sets MASTER_HOST=master)
+    #     # then constructor arg, then config
+    #     self.master_host = (master_host
+    #                         or os.environ.get("MASTER_HOST")
+    #                         or CFG["communication"]["host"])
+    #     self.master_port = (master_port
+    #                         or int(os.environ.get("MASTER_PORT",
+    #                             CFG["communication"]["port"])))
+    #     # Artificial delay for simulating slow workers (default 0.0)
+    #     self.artificial_delay = artificial_delay if artificial_delay is not None else 0.0
+    #     self.conn = None
+    #     self.model = None
+    #     self.X = None
+    #     self.y = None
+
+    def __init__(self, worker_id: int, master_host: str = None,
+             master_port: int = None, artificial_delay: float = None):
+
+        self.worker_id       = worker_id
+        self.master_host     = (master_host
+                                or os.environ.get("MASTER_HOST")
+                                or CFG["communication"]["host"])
+        self.master_port     = (master_port
+                                or int(os.environ.get("MASTER_PORT",
+                                    CFG["communication"]["port"])))
+        self.artificial_delay = (artificial_delay
+                                if artificial_delay is not None
+                                else float(os.environ.get("WORKER_DELAY", 0.0)))
+        self.conn  = None
         self.model = None
-        self.X = None
-        self.y = None
+        self.X     = None
+        self.y     = None
+        
 
     def run(self):
         """Connect to master and run the full worker lifecycle.
@@ -81,23 +112,28 @@ class Worker:
         
         for attempt in range(1, max_retries + 1):
             try:
+                self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.conn.connect((self.master_host, self.master_port))
                 print(f"[Worker {self.worker_id}] Connected to master.")
                 break
-            except ConnectionRefusedError as e:
-                last_error = e
+            except ConnectionRefusedError:
+                self.conn.close()           # ← close the broken socket
+                self.conn = None
                 if attempt < max_retries:
-                    wait_time = retry_delay * (2 ** (attempt - 1))  # exponential backoff
-                    print(f"[Worker {self.worker_id}] Connection attempt {attempt}/{max_retries} failed. "
-                          f"Retrying in {wait_time:.1f}s...")
-                    time.sleep(wait_time)
+                    wait = 0.5 * (2 ** (attempt - 1))
+                    print(f"[Worker {self.worker_id}] Connection attempt "
+                        f"{attempt}/{max_retries} failed. Retrying in {wait:.1f}s...")
+                    time.sleep(wait)
                 else:
-                    print(f"[Worker {self.worker_id}] Failed to connect after {max_retries} attempts.")
-                    raise last_error
+                    raise ConnectionRefusedError(
+                        f"[Worker {self.worker_id}] Could not connect after "
+                        f"{max_retries} attempts."
+                    )
 
         # Register with master
         self.conn.sendall(
-            encode_message(MSG_REGISTER, self.worker_id, {"worker_id": self.worker_id})
+            encode_message(MSG_REGISTER, self.worker_id,
+                        {"worker_id": self.worker_id})
         )
 
         # Complete benchmark

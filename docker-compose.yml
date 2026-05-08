@@ -1,0 +1,74 @@
+version: "3.8"
+
+# docker-compose.yml — 2 worker setup
+#
+# Usage:
+#   docker-compose build          # build images (once, or after code changes)
+#   docker-compose up             # start master + 2 workers
+#   docker-compose down           # stop and remove containers
+#   docker logs -f dnn_master     # watch master output live
+#
+# Output files are written to these local folders via volume mounts:
+#   ./logs/              — training_log.csv
+#   ./saved_models/      — final model weights (JSON + NPZ)
+#   ./benchmark_results/ — performance report JSON
+
+services:
+
+  master:
+    build:
+      context: .
+      dockerfile: Dockerfile.master
+    container_name: dnn_master
+    hostname: master
+    environment:
+      - MASTER_HOST=0.0.0.0
+      - MASTER_PORT=5000
+      - N_WORKERS=2
+      - N_EPOCHS=10
+      - N_SAMPLES=10000
+    ports:
+      - "5000:5000"     # expose port so local scripts can also connect
+    volumes:
+      - ./logs:/app/logs
+      - ./saved_models:/app/saved_models
+      - ./benchmark_results:/app/benchmark_results
+      - ./graphs:/app/graphs
+    networks:
+      - dnn_network
+
+  worker_0:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: dnn_worker_0
+    hostname: worker_0
+    environment:
+      - WORKER_ID=0
+      - WORKER_DELAY=0.0
+      - MASTER_HOST=master
+      - MASTER_PORT=5000
+    depends_on:
+      - master
+    networks:
+      - dnn_network
+
+  worker_1:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: dnn_worker_1
+    hostname: worker_1
+    environment:
+      - WORKER_ID=1
+      - WORKER_DELAY=0.0
+      - MASTER_HOST=master
+      - MASTER_PORT=5000
+    depends_on:
+      - master
+    networks:
+      - dnn_network
+
+networks:
+  dnn_network:
+    driver: bridge

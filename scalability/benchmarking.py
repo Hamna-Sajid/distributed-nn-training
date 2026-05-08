@@ -41,7 +41,7 @@ from scalability.parallel_efficiency import EfficiencyCalculator
 # ── Experiment configurations ──────────────────────────────────────────────────
 
 # Cluster sizes to sweep — each is a number of workers
-CLUSTER_SIZES = [1, 2]   
+CLUSTER_SIZES = [1, 2, 4]   
 
 # Sample sizes to test scalability against
 SCALE_SAMPLES = [
