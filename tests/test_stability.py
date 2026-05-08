@@ -9,6 +9,7 @@ Ensures full system stability by running end-to-end tests covering:
 5. Resource monitor runs without crashing
 6. Scalability: 2-worker run finishes faster than serial baseline
 7. Full pipeline integration test (all components together)
+8. Scalability: 4-worker run finishes faster than serial baseline
 
 Results are compiled into a final JSON report with pass/fail status
 for each test, suitable for inclusion in the M3 documentation.
@@ -244,6 +245,26 @@ def test_6_scalability_2workers_faster(port_serial=5601, port_parallel=5602):
              "loss_1w": m1["final_loss"], "loss_2w": m2["final_loss"]})
 
 
+def test_8_scalability_4workers(port_serial=5604, port_parallel=5605):
+    """4-worker distributed run should be faster than 1-worker and converge."""
+    print("\n[Test 8] Scalability: 4-worker vs 1-worker...")
+    m1, t1 = _experiment(port_serial,   n_workers=1, n_samples=500, n_epochs=3)
+    m4, t4 = _experiment(port_parallel, n_workers=4, n_samples=500, n_epochs=3)
+
+    if m1 is None or m4 is None:
+        _record("scalability_4workers", False, "one or both experiments failed")
+        return
+
+    both_converge = m1["final_loss"] < 0.71 and m4["final_loss"] < 0.71
+    speedup = round(t1 / t4, 3) if t4 > 0 else 0
+
+    _record("scalability_4workers",
+            both_converge,
+            f"1-worker={t1}s, 4-worker={t4}s, speedup={speedup}x",
+            {"serial_time": t1, "parallel_time": t4, "speedup": speedup,
+             "loss_1w": m1["final_loss"], "loss_4w": m4["final_loss"]})
+
+
 def test_7_full_pipeline_integration(port=5603):
     """Full pipeline: compression + adaptive aggregation + 2 workers."""
     print("\n[Test 7] Full pipeline integration...")
@@ -284,7 +305,7 @@ if __name__ == "__main__":
     multiprocessing.set_start_method("spawn", force=True)
 
     print("\n" + "=" * 55)
-    print("  M3 STABILITY & INTEGRATION TEST SUITE")
+    print("  STABILITY & INTEGRATION TEST SUITE")
     print("=" * 55)
 
     tests = [

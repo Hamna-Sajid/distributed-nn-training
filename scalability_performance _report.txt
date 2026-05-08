@@ -1,0 +1,153 @@
+[Scalability] n_workers=1 | n_samples=10,000 | n_epochs=5
+
+=======================================================
+  PERFORMANCE REPORT
+=======================================================
+  Dataset:    MNIST — 10,000 samples
+  Workers:    1
+  Epochs:     5
+  Total time: 87.75s
+  Avg epoch:  17.55s
+  Throughput: 569.8 samples/sec
+  Loss:       0.693368 → 0.68548 (1.14% reduction)
+  Test loss:  0.683546
+  Accuracy:   0.103
+  F1 Score:   0.0359
+=======================================================
+
+[Scalability] n_workers=2 | n_samples=10,000 | n_epochs=5
+
+=======================================================
+  PERFORMANCE REPORT
+=======================================================
+  Dataset:    MNIST — 10,000 samples
+  Workers:    2
+  Epochs:     5
+  Total time: 117.19s
+  Avg epoch:  23.44s
+  Throughput: 426.65 samples/sec
+  Loss:       0.693401 → 0.68573 (1.11% reduction)
+  Test loss:  0.683838
+  Accuracy:   0.128
+  F1 Score:   0.0928
+=======================================================
+
+
+[Scalability] n_workers=4 | n_samples=10,000 | n_epochs=5
+
+=======================================================
+  PERFORMANCE REPORT
+=======================================================
+  Dataset:    MNIST — 10,000 samples
+  Workers:    4
+  Epochs:     5
+  Total time: 198.52s
+  Avg epoch:  39.7s
+  Throughput: 251.86 samples/sec
+  Loss:       0.693607 → 0.685753 (1.13% reduction)
+  Test loss:  0.683833
+  Accuracy:   0.105
+  F1 Score:   0.0694
+=======================================================
+
+[Scalability] n_workers=1 | n_samples=20,000 | n_epochs=5
+
+=======================================================
+  PERFORMANCE REPORT
+=======================================================
+  Dataset:    MNIST — 20,000 samples
+  Workers:    1
+  Epochs:     5
+  Total time: 108.15s
+  Avg epoch:  21.63s
+  Throughput: 924.67 samples/sec
+  Loss:       0.693057 → 0.685375 (1.11% reduction)
+  Test loss:  0.683475
+  Accuracy:   0.11
+  F1 Score:   0.0775
+=======================================================
+
+[Scalability] n_workers=2 | n_samples=20,000 | n_epochs=5
+
+=======================================================
+  PERFORMANCE REPORT
+=======================================================
+  Dataset:    MNIST — 20,000 samples
+  Workers:    2
+  Epochs:     5
+  Total time: 133.56s
+  Avg epoch:  26.71s
+  Throughput: 748.73 samples/sec
+  Loss:       0.693492 → 0.685742 (1.12% reduction)
+  Test loss:  0.683839
+  Accuracy:   0.105
+  F1 Score:   0.0478
+=======================================================
+
+[Scalability] n_workers=4 | n_samples=20,000 | n_epochs=5
+
+=======================================================
+  PERFORMANCE REPORT
+=======================================================
+  Dataset:    MNIST — 20,000 samples
+  Workers:    4
+  Epochs:     5
+  Total time: 203.49s
+  Avg epoch:  40.7s
+  Throughput: 491.42 samples/sec
+  Loss:       0.693284 → 0.685448 (1.13% reduction)
+  Test loss:  0.683523
+  Accuracy:   0.0815
+  F1 Score:   0.0638
+=======================================================
+
+[Scalability] n_workers=1 | n_samples=40,000 | n_epochs=5
+
+=======================================================
+  PERFORMANCE REPORT
+=======================================================
+  Dataset:    MNIST — 40,000 samples
+  Workers:    1
+  Epochs:     5
+  Total time: 153.19s
+  Avg epoch:  30.64s
+  Throughput: 1305.6 samples/sec
+  Loss:       0.693453 → 0.685585 (1.13% reduction)
+  Test loss:  0.683647
+  Accuracy:   0.1315
+  F1 Score:   0.0756
+=======================================================
+
+[Scalability] n_workers=2 | n_samples=40,000 | n_epochs=5
+
+=======================================================
+  PERFORMANCE REPORT
+=======================================================
+  Dataset:    MNIST — 40,000 samples
+  Workers:    2
+  Epochs:     5
+  Total time: 168.51s
+  Avg epoch:  33.7s
+  Throughput: 1186.86 samples/sec
+  Loss:       0.692969 → 0.685141 (1.13% reduction)
+  Test loss:  0.683201
+  Accuracy:   0.0927
+  F1 Score:   0.0306
+=======================================================
+
+[Scalability] n_workers=4 | n_samples=40,000 | n_epochs=5
+
+=======================================================
+  PERFORMANCE REPORT
+=======================================================
+  Dataset:    MNIST — 40,000 samples
+  Workers:    4
+  Epochs:     5
+  Total time: 247.03s
+  Avg epoch:  49.41s
+  Throughput: 809.63 samples/sec
+  Loss:       0.69346 → 0.685756 (1.11% reduction)
+  Test loss:  0.683856
+  Accuracy:   0.1777
+  F1 Score:   0.1281
+=======================================================
