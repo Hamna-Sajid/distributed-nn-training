@@ -1,0 +1,45 @@
+=======================================================
+  PERFORMANCE REPORT
+=======================================================
+  Dataset:    MNIST — 10,000 samples
+  Workers:    2
+  Epochs:     10
+  Total time: 281.59s
+  Avg epoch:  28.16s
+  Throughput: 355.13 samples/sec
+  Loss:       0.693365 → 0.67602 (2.5% reduction)
+  Test loss:  0.674159
+  Accuracy:   0.105
+  F1 Score:   0.0477
+=======================================================
+
+=======================================================================
+dnn_master    |   PERFORMANCE REPORT
+dnn_master    | =======================================================
+dnn_master    |   Dataset:    MNIST — 10,000 samples
+dnn_master    |   Workers:    2
+dnn_master    |   Epochs:     10
+dnn_master    |   Total time: 346.31s
+dnn_master    |   Avg epoch:  34.63s
+dnn_master    |   Throughput: 288.76 samples/sec
+dnn_master    |   Loss:       0.692408 → 0.674878 (2.53% reduction)
+dnn_master    |   Test loss:  0.672983
+dnn_master    |   Accuracy:   0.113
+dnn_master    |   F1 Score:   0.0837
+dnn_master    | =======================================================
+
+
+dnn_master_4w    | ====================================================
+dnn_master_4w    |   PERFORMANCE REPORT
+dnn_master_4w    | ====================================================
+dnn_master_4w    |   Dataset:    MNIST — 10,000 samples
+dnn_master_4w    |   Workers:    4
+dnn_master_4w    |   Epochs:     10
+dnn_master_4w    |   Total time: 590.44s
+dnn_master_4w    |   Avg epoch:  59.04s
+dnn_master_4w    |   Throughput: 169.37 samples/sec
+dnn_master_4w    |   Loss:       0.693266 → 0.676182 (2.46% reduction)
+dnn_master_4w    |   Test loss:  0.674333
+dnn_master_4w    |   Accuracy:   0.105
+dnn_master_4w    |   F1 Score:   0.041
+dnn_master_4w    | ===================================================

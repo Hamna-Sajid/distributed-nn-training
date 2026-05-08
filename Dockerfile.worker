@@ -1,0 +1,31 @@
+# Dockerfile.worker — Worker node container
+# Builds a self-contained image for one worker node.
+# Each worker container gets its own Python process and memory space,
+# properly simulating separate machines in a distributed system.
+#
+# The worker:
+#   - Connects to the master container via Docker network
+#   - Completes RTT benchmark
+#   - Receives data shard + initial weights
+#   - Runs forward/backward pass each epoch
+#   - Sends gradients back to master
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy entire project
+COPY . .
+
+# Environment variables — set per-worker in docker-compose.yml
+ENV PYTHONUNBUFFERED=1
+ENV WORKER_ID=0
+ENV WORKER_DELAY=0.0
+ENV MASTER_HOST=master
+ENV MASTER_PORT=5000
+
+CMD ["sh", "-c", "python run_worker.py $WORKER_ID $WORKER_DELAY"]

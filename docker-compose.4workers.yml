@@ -1,0 +1,103 @@
+version: "3.8"
+
+# docker-compose.4workers.yml — 4 worker setup
+#
+# Each worker is an isolated container with its own Python process.
+# This properly simulates 4 separate machines on a LAN.
+#
+# Usage:
+#   docker-compose -f docker-compose.4workers.yml build
+#   docker-compose -f docker-compose.4workers.yml up
+#   docker-compose -f docker-compose.4workers.yml down
+
+services:
+
+  master:
+    build:
+      context: .
+      dockerfile: Dockerfile.master
+    container_name: dnn_master_4w
+    hostname: master
+    environment:
+      - MASTER_HOST=0.0.0.0
+      - MASTER_PORT=5000
+      - N_WORKERS=4
+      - N_EPOCHS=10
+      - N_SAMPLES=10000
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./logs:/app/logs
+      - ./saved_models:/app/saved_models
+      - ./benchmark_results:/app/benchmark_results
+      - ./graphs:/app/graphs
+    networks:
+      - dnn_network_4w
+
+  worker_0:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: dnn_worker_0_4w
+    hostname: worker_0
+    environment:
+      - WORKER_ID=0
+      - WORKER_DELAY=0.0
+      - MASTER_HOST=master
+      - MASTER_PORT=5000
+    depends_on:
+      - master
+    networks:
+      - dnn_network_4w
+
+  worker_1:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: dnn_worker_1_4w
+    hostname: worker_1
+    environment:
+      - WORKER_ID=1
+      - WORKER_DELAY=0.0
+      - MASTER_HOST=master
+      - MASTER_PORT=5000
+    depends_on:
+      - master
+    networks:
+      - dnn_network_4w
+
+  worker_2:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: dnn_worker_2_4w
+    hostname: worker_2
+    environment:
+      - WORKER_ID=2
+      - WORKER_DELAY=0.0
+      - MASTER_HOST=master
+      - MASTER_PORT=5000
+    depends_on:
+      - master
+    networks:
+      - dnn_network_4w
+
+  worker_3:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: dnn_worker_3_4w
+    hostname: worker_3
+    environment:
+      - WORKER_ID=3
+      - WORKER_DELAY=0.0
+      - MASTER_HOST=master
+      - MASTER_PORT=5000
+    depends_on:
+      - master
+    networks:
+      - dnn_network_4w
+
+networks:
+  dnn_network_4w:
+    driver: bridge
