@@ -12,9 +12,9 @@ A distributed neural network training system built from scratch using **NumPy an
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Running the System](#running-the-system)
-  - [Milestone 1 — Baseline Distributed Training](#milestone-1--baseline-distributed-training)
-  - [Milestone 2 — Sync Barrier, Adaptive Aggregation & Compression](#milestone-2--sync-barrier-adaptive-aggregation--compression)
-  - [Milestone 3 — Performance Scaling & Optimization](#milestone-3--performance-scaling--optimization)
+  - [Baseline Distributed Training](#baseline-distributed-training)
+  - [Sync Barrier, Adaptive Aggregation & Compression](#sync-barrier-adaptive-aggregation--compression)
+  - [Performance Scaling & Optimization](#performance-scaling--optimization)
 - [Benchmark Suite](#benchmark-suite)
 - [Running Tests](#running-tests)
 - [Neural Network Architecture](#neural-network-architecture)
@@ -28,9 +28,9 @@ A distributed neural network training system built from scratch using **NumPy an
 
 This project trains a multi-label classification neural network across distributed compute nodes:
 
-- **Baseline (M1)**: Basic distributed training with parameter server architecture
-- **Enhanced (M2)**: Adds synchronous barriers, adaptive gradient aggregation, and compression
-- **Optimized (M3)**: Performance scaling benchmarks and optimization across varying worker counts and data sizes
+- **Baseline**: Basic distributed training with parameter server architecture
+- **Enhanced**: Adds synchronous barriers, adaptive gradient aggregation, and compression
+- **Optimized**: Performance scaling benchmarks and optimization across varying worker counts and data sizes
 
 **Key Features:**
 - Synchronous gradient aggregation with barrier synchronization
