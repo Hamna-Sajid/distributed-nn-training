@@ -12,13 +12,9 @@ Each worker:
 import socket
 import time
 import numpy as np
-import os
-from config_loader import CFG
-
 
 from communication.protocol import (
     encode_message, decode_message,
-    send_gradient_message, recv_gradient_message,
     MSG_REGISTER, MSG_BENCHMARK, MSG_BENCH_RESULT,
     MSG_DATA_SHARD, MSG_GRADIENT, MSG_MODEL_UPDATE,
     MSG_SYNCHRONIZE, MSG_DONE
@@ -53,44 +49,16 @@ class Worker:
         Local data shard label matrix.
     """
 
-    # def __init__(self, worker_id: int,
-    #          master_host: str = None,
-    #          master_port: int = None,
-    #          artificial_delay: float = None):
-    #     self.worker_id   = worker_id
-    #     # Read from env first (Docker sets MASTER_HOST=master)
-    #     # then constructor arg, then config
-    #     self.master_host = (master_host
-    #                         or os.environ.get("MASTER_HOST")
-    #                         or CFG["communication"]["host"])
-    #     self.master_port = (master_port
-    #                         or int(os.environ.get("MASTER_PORT",
-    #                             CFG["communication"]["port"])))
-    #     # Artificial delay for simulating slow workers (default 0.0)
-    #     self.artificial_delay = artificial_delay if artificial_delay is not None else 0.0
-    #     self.conn = None
-    #     self.model = None
-    #     self.X = None
-    #     self.y = None
-
-    def __init__(self, worker_id: int, master_host: str = None,
-             master_port: int = None, artificial_delay: float = None):
-
-        self.worker_id       = worker_id
-        self.master_host     = (master_host
-                                or os.environ.get("MASTER_HOST")
-                                or CFG["communication"]["host"])
-        self.master_port     = (master_port
-                                or int(os.environ.get("MASTER_PORT",
-                                    CFG["communication"]["port"])))
-        self.artificial_delay = (artificial_delay
-                                if artificial_delay is not None
-                                else float(os.environ.get("WORKER_DELAY", 0.0)))
-        self.conn  = None
+    def __init__(self, worker_id: int, master_host: str = "localhost",
+                 master_port: int = 5000, artificial_delay: float = 0.0):
+        self.worker_id = worker_id
+        self.master_host = master_host
+        self.master_port = master_port
+        self.artificial_delay = artificial_delay
+        self.conn = None
         self.model = None
-        self.X     = None
-        self.y     = None
-        
+        self.X = None
+        self.y = None
 
     def run(self):
         """Connect to master and run the full worker lifecycle.
@@ -104,36 +72,12 @@ class Worker:
           6. Terminate on DONE
         """
         self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        
-        # Connect with retry logic (master may not be ready immediately)
-        max_retries = 10
-        retry_delay = 0.5
-        last_error = None
-        
-        for attempt in range(1, max_retries + 1):
-            try:
-                self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.conn.connect((self.master_host, self.master_port))
-                print(f"[Worker {self.worker_id}] Connected to master.")
-                break
-            except ConnectionRefusedError:
-                self.conn.close()           # ← close the broken socket
-                self.conn = None
-                if attempt < max_retries:
-                    wait = 0.5 * (2 ** (attempt - 1))
-                    print(f"[Worker {self.worker_id}] Connection attempt "
-                        f"{attempt}/{max_retries} failed. Retrying in {wait:.1f}s...")
-                    time.sleep(wait)
-                else:
-                    raise ConnectionRefusedError(
-                        f"[Worker {self.worker_id}] Could not connect after "
-                        f"{max_retries} attempts."
-                    )
+        self.conn.connect((self.master_host, self.master_port))
+        print(f"[Worker {self.worker_id}] Connected to master.")
 
         # Register with master
         self.conn.sendall(
-            encode_message(MSG_REGISTER, self.worker_id,
-                        {"worker_id": self.worker_id})
+            encode_message(MSG_REGISTER, self.worker_id, {"worker_id": self.worker_id})
         )
 
         # Complete benchmark
@@ -191,54 +135,36 @@ class Worker:
             Number of training epochs, must match master's n_epochs.
         """
         for epoch in range(n_epochs):
-            try:
-                # Wait for master to signal start of this epoch
-                msg = decode_message(self.conn)
+            # Wait for master to signal start of this epoch
+            msg = decode_message(self.conn)
 
-                if msg["type"] == MSG_DONE:
-                    print(f"[Worker {self.worker_id}] Received DONE early, stopping.")
-                    return
+            if msg["type"] == MSG_DONE:
+                print(f"[Worker {self.worker_id}] Received DONE early, stopping.")
+                return
 
-                assert msg["type"] == MSG_SYNCHRONIZE
+            assert msg["type"] == MSG_SYNCHRONIZE
 
-                # Optional artificial delay to simulate slow computation
-                if self.artificial_delay > 0:
-                    time.sleep(self.artificial_delay)
+            # Optional artificial delay to simulate slow computation
+            if self.artificial_delay > 0:
+                time.sleep(self.artificial_delay)
 
-                # Forward + backward pass on local shard
-                y_pred = self.model.forward(self.X)
-                loss = self.model.compute_loss(y_pred, self.y)
-                gradients = self.model.backward(y_pred, self.y)
+            # Forward + backward pass on local shard
+            y_pred = self.model.forward(self.X)
+            loss = self.model.compute_loss(y_pred, self.y)
+            gradients = self.model.backward(y_pred, self.y)
 
-                print(f"[Worker {self.worker_id}] Epoch {epoch+1} | Loss: {loss:.4f}")
+            print(f"[Worker {self.worker_id}] Epoch {epoch+1} | Loss: {loss:.4f}")
 
-                # Send gradients and metadata to master (with optional compression)
-                from config_loader import load_config
-                config = load_config()
-                compression_config = config.get("communication", {}).get("compression", {})
-                
-                send_gradient_message(
-                    self.conn, self.worker_id,
-                    gradients=gradients,
-                    batch_size=self.X.shape[0],
-                    loss=loss,
-                    compression_enabled=compression_config.get("enabled", False),
-                    compression_type=compression_config.get("type", "int8"),
-                    log_stats=compression_config.get("log_stats", False)
-                )
+            # Send gradients and metadata to master
+            self.conn.sendall(
+                encode_message(MSG_GRADIENT, self.worker_id, {
+                    "gradients": gradients,
+                    "batch_size": self.X.shape[0],
+                    "loss": loss,
+                })
+            )
 
-                # Receive updated model weights from master
-                msg = decode_message(self.conn)
-                if msg["type"] == MSG_DONE:
-                    print(f"[Worker {self.worker_id}] Received DONE, stopping.")
-                    return
-                assert msg["type"] == MSG_MODEL_UPDATE
-                self.model.set_weights(msg["data"]["weights"])
-            except ConnectionError as e:
-                print(f"[Worker {self.worker_id}] Connection error in epoch {epoch+1}: {e}")
-                raise
-            except Exception as e:
-                print(f"[Worker {self.worker_id}] Unexpected error in epoch {epoch+1}: {type(e).__name__}: {e}")
-                import traceback
-                traceback.print_exc()
-                raise
+            # Receive updated model weights from master
+            msg = decode_message(self.conn)
+            assert msg["type"] == MSG_MODEL_UPDATE
+            self.model.set_weights(msg["data"]["weights"])
