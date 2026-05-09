@@ -11,8 +11,7 @@ REGISTER    : Worker → Master  — worker announces itself on connection
 BENCHMARK   : Master → Worker  — small task to measure worker speed
 BENCH_RESULT: Worker → Master  — worker returns benchmark timing
 DATA_SHARD  : Master → Worker  — initial dataset shard + model weights
-GRADIENT    : Worker → Master  — local gradients after backward pass (uncompressed)
-MSG_GRADIENT_COMPRESSED: Worker → Master  — local gradients (int8 quantized)
+GRADIENT    : Worker → Master  — local gradients after backward pass
 MODEL_UPDATE: Master → Worker  — averaged weights after aggregation
 SYNCHRONIZE : Master → Worker  — barrier signal to begin next iteration
 DONE        : Master → Worker  — training complete, worker may shut down
@@ -22,7 +21,6 @@ import json
 import struct
 import socket
 import numpy as np
-import time
 
 
 # ---------------------------------------------------------------------------
@@ -33,23 +31,9 @@ MSG_BENCHMARK = "BENCHMARK"
 MSG_BENCH_RESULT = "BENCH_RESULT"
 MSG_DATA_SHARD = "DATA_SHARD"
 MSG_GRADIENT = "GRADIENT"
-MSG_GRADIENT_COMPRESSED = "GRADIENT_COMPRESSED"
 MSG_MODEL_UPDATE = "MODEL_UPDATE"
 MSG_SYNCHRONIZE = "SYNCHRONIZE"
 MSG_DONE = "DONE"
-
-# Global compression stats (for monitoring)
-_compression_stats = {
-    "total_messages": 0,
-    "total_original_bytes": 0,
-    "total_compressed_bytes": 0,
-}
-
-
-def get_compression_stats() -> dict:
-    """Get cumulative compression statistics."""
-    return dict(_compression_stats)
-
 
 
 def _numpy_to_lists(obj):
@@ -164,112 +148,3 @@ def _recv_exact(sock: socket.socket, n_bytes: int) -> bytes:
             return b""
         buf += chunk
     return buf
-
-
-# =============================================================================
-# Gradient Compression Helpers (Communication Optimization)
-# =============================================================================
-
-def send_gradient_message(sock: socket.socket, worker_id: int, gradients: dict,
-                         batch_size: int, loss: float, compression_enabled: bool = False,
-                         compression_type: str = 'int8', log_stats: bool = False) -> None:
-    """Send gradient message with optional compression.
-    
-    Parameters
-    ----------
-    sock : socket.socket
-        Connected socket to send to
-    worker_id : int
-        ID of sending worker
-    gradients : dict
-        Gradient dictionary {"layer1": {"dW": ndarray, ...}, ...}
-    batch_size : int
-        Batch size for this gradient
-    loss : float
-        Training loss for this batch
-    compression_enabled : bool
-        Whether to compress gradients
-    compression_type : str
-        Type of compression ('int8', 'int16', 'none')
-    log_stats : bool
-        Whether to log compression statistics
-    """
-    if not compression_enabled or compression_type == 'none':
-        # Send uncompressed
-        payload = {
-            "gradients": gradients,
-            "batch_size": batch_size,
-            "loss": loss,
-            "compressed": False
-        }
-        msg = encode_message(MSG_GRADIENT, worker_id, payload)
-    else:
-        # Compress and send
-        from communication.compression import compress_gradients
-        
-        compressed_grad = compress_gradients(gradients, compression_type=compression_type)
-        
-        # Track stats
-        original_bytes = sum(
-            np.array(v["quantized"]).nbytes * 4  # Approximate original float32 size
-            for layer in compressed_grad["layers"].values()
-            for v in layer.values()
-        )
-        compressed_bytes = sum(
-            np.array(v["quantized"]).nbytes
-            for layer in compressed_grad["layers"].values()
-            for v in layer.values()
-        )
-        
-        _compression_stats["total_messages"] += 1
-        _compression_stats["total_original_bytes"] += original_bytes
-        _compression_stats["total_compressed_bytes"] += compressed_bytes
-        
-        if log_stats:
-            ratio = original_bytes / compressed_bytes if compressed_bytes > 0 else 1.0
-            print(f"[Compression] Worker {worker_id}: {original_bytes:,} → {compressed_bytes:,} bytes ({ratio:.2f}x)")
-        
-        payload = {
-            "gradients": compressed_grad,
-            "batch_size": batch_size,
-            "loss": loss,
-            "compressed": True,
-            "compression_type": compression_type
-        }
-        msg = encode_message(MSG_GRADIENT_COMPRESSED, worker_id, payload)
-    
-    sock.sendall(msg)
-
-
-def recv_gradient_message(sock: socket.socket) -> dict:
-    """Receive gradient message and automatically decompress if needed.
-    
-    Returns
-    -------
-    dict
-        Dictionary with keys: "worker_id", "gradients", "batch_size", "loss"
-    """
-    msg = decode_message(sock)
-    
-    msg_type = msg["type"]
-    worker_id = msg["sender"]
-    data = msg["data"]
-    
-    # Handle both compressed and uncompressed
-    if msg_type == MSG_GRADIENT_COMPRESSED and data.get("compressed", False):
-        from communication.compression import decompress_gradients
-        
-        # Decompress
-        gradients = decompress_gradients(data["gradients"])
-    elif msg_type == MSG_GRADIENT or not data.get("compressed", False):
-        # Uncompressed
-        gradients = data["gradients"]
-    else:
-        raise ValueError(f"Unknown gradient message type: {msg_type}")
-    
-    return {
-        "worker_id": worker_id,
-        "gradients": gradients,
-        "batch_size": data["batch_size"],
-        "loss": data["loss"]
-    }
